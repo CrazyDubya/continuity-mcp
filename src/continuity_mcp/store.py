@@ -19,7 +19,6 @@ from continuity_mcp.models import CanonicalConversation
 _SEARCH_LIMIT_MAX = 50
 _CONVERSATION_LIMIT_MAX = 200
 _MESSAGE_CHARS_MAX = 20_000
-_SCHEMA_VERSION = 1
 
 @dataclass(frozen=True, slots=True)
 class SourceRecord:
@@ -235,7 +234,6 @@ class ArchiveStore:
                 END;
                 """
             )
-            conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
 
     def ingest_source(self, source_path: str | Path, provider: str) -> SourceRecord:
         """Copy exact source bytes into content-addressed local storage."""
