@@ -18,7 +18,7 @@ from continuity_mcp.models import CanonicalConversation
 _SEARCH_LIMIT_MAX = 50
 _CONVERSATION_LIMIT_MAX = 200
 _MESSAGE_CHARS_MAX = 20_000
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 @dataclass(frozen=True, slots=True)
 class SourceRecord:
@@ -48,6 +48,36 @@ def _canonical_message_id(provider: str, conversation_id: str, source_id: str) -
         f"{_id_component(provider)}:{_id_component(conversation_id)}:"
         f"{_id_component(source_id)}"
     )
+
+def _conversation_fingerprint(conversation: CanonicalConversation) -> str:
+    payload = {
+        "provider": conversation.provider,
+        "conversation_id": conversation.conversation_id,
+        "title": conversation.title,
+        "created_at": conversation.created_at,
+        "updated_at": conversation.updated_at,
+        "messages": [
+            {
+                "message_id": message.message_id,
+                "provider_message_id": message.provider_message_id,
+                "role": message.role,
+                "content": message.content,
+                "created_at": message.created_at,
+                "updated_at": message.updated_at,
+                "parent_id": message.parent_id,
+                "children_ids": message.children_ids,
+            }
+            for message in conversation.messages
+        ],
+    }
+    serialized = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
 
 def _fts_query(query: str) -> str:
     # Quoting the whitespace-delimited terms keeps user input out of FTS query
@@ -110,6 +140,7 @@ class ArchiveStore:
                     provider TEXT NOT NULL,
                     source_conversation_id TEXT NOT NULL,
                     source_id INTEGER REFERENCES sources(id),
+                    canonical_sha256 TEXT,
                     title TEXT NOT NULL,
                     created_at REAL,
                     updated_at REAL,
@@ -164,6 +195,16 @@ class ArchiveStore:
                 END;
                 """
             )
+
+            conversation_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(conversations)")
+            }
+            if "canonical_sha256" not in conversation_columns:
+                conn.execute(
+                    "ALTER TABLE conversations ADD COLUMN canonical_sha256 TEXT"
+                )
+
             if version < _SCHEMA_VERSION:
                 conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
 
@@ -251,9 +292,11 @@ class ArchiveStore:
         conversations: Iterable[CanonicalConversation],
         *,
         source_id: int | None = None,
+        force_reimport: bool = False,
     ) -> dict[str, int | bool]:
         imported_conversations = 0
         imported_messages = 0
+        unchanged_conversations = 0
         provider_seen: str | None = None
 
         with self._connect() as conn:
@@ -270,10 +313,11 @@ class ArchiveStore:
                     "SELECT 1 FROM imports WHERE source_id = ? LIMIT 1",
                     (source_id,),
                 ).fetchone()
-                if already_imported is not None:
+                if already_imported is not None and not force_reimport:
                     return {
                         "conversations": 0,
                         "messages": 0,
+                        "unchanged_conversations": 0,
                         "duplicate_source": True,
                     }
 
@@ -291,6 +335,20 @@ class ArchiveStore:
                 canonical_conversation_id = _canonical_conversation_id(
                     conversation.provider, conversation.conversation_id
                 )
+                canonical_sha256 = _conversation_fingerprint(conversation)
+
+                existing = conn.execute(
+                    "SELECT canonical_sha256 FROM conversations WHERE id = ?",
+                    (canonical_conversation_id,),
+                ).fetchone()
+                if (
+                    existing is not None
+                    and existing["canonical_sha256"] == canonical_sha256
+                    and not force_reimport
+                ):
+                    imported_conversations += 1
+                    unchanged_conversations += 1
+                    continue
 
                 conn.execute(
                     "DELETE FROM messages WHERE conversation_id = ?",
@@ -299,11 +357,12 @@ class ArchiveStore:
                 conn.execute(
                     """
                     INSERT INTO conversations(
-                        id, provider, source_conversation_id, source_id, title,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        id, provider, source_conversation_id, source_id,
+                        canonical_sha256, title, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         source_id=excluded.source_id,
+                        canonical_sha256=excluded.canonical_sha256,
                         title=excluded.title,
                         created_at=excluded.created_at,
                         updated_at=excluded.updated_at
@@ -313,6 +372,7 @@ class ArchiveStore:
                         conversation.provider,
                         conversation.conversation_id,
                         source_id,
+                        canonical_sha256,
                         conversation.title,
                         conversation.created_at,
                         conversation.updated_at,
@@ -375,6 +435,7 @@ class ArchiveStore:
         return {
             "conversations": imported_conversations,
             "messages": imported_messages,
+            "unchanged_conversations": unchanged_conversations,
             "duplicate_source": False,
         }
 
@@ -404,7 +465,9 @@ class ArchiveStore:
             ).fetchone()[0]
 
         return {
-            "schema_version": _SCHEMA_VERSION,
+            "schema_version": int(
+                conn.execute("PRAGMA user_version").fetchone()[0]
+            ),
             "providers": providers,
             "conversations": conversation_count,
             "messages": message_count,
