@@ -48,6 +48,59 @@ def _canonical_message_id(provider: str, conversation_id: str, source_id: str) -
         f"{_id_component(source_id)}"
     )
 
+def _validate_conversation(
+    conversation: CanonicalConversation,
+    source_provider: str,
+) -> None:
+    if not conversation.provider:
+        raise ValueError("Conversation provider must not be empty")
+    if conversation.provider != source_provider:
+        raise ValueError("Imported conversation provider does not match source provider")
+    if not conversation.conversation_id:
+        raise ValueError("Conversation id must not be empty")
+
+    messages_by_id = {}
+    for message in conversation.messages:
+        if message.provider != conversation.provider:
+            raise ValueError(
+                "Message provider does not match its conversation provider"
+            )
+        if message.conversation_id != conversation.conversation_id:
+            raise ValueError(
+                "Message conversation id does not match its conversation"
+            )
+        if not message.message_id:
+            raise ValueError("Message id must not be empty")
+        if message.message_id in messages_by_id:
+            raise ValueError(f"Duplicate message id: {message.message_id}")
+        messages_by_id[message.message_id] = message
+
+    for message in conversation.messages:
+        if message.parent_id is not None:
+            parent = messages_by_id.get(message.parent_id)
+            if parent is None:
+                raise ValueError(
+                    f"Unknown parent message id {message.parent_id!r} "
+                    f"for {message.message_id!r}"
+                )
+            if message.message_id not in parent.children_ids:
+                raise ValueError(
+                    f"Parent/child mismatch for {message.message_id!r}"
+                )
+
+        for child_id in message.children_ids:
+            child = messages_by_id.get(child_id)
+            if child is None:
+                raise ValueError(
+                    f"Unknown child message id {child_id!r} "
+                    f"for {message.message_id!r}"
+                )
+            if child.parent_id != message.message_id:
+                raise ValueError(
+                    f"Parent/child mismatch for {child_id!r}"
+                )
+
+
 def _conversation_fingerprint(conversation: CanonicalConversation) -> str:
     payload = {
         "provider": conversation.provider,
@@ -290,15 +343,7 @@ class ArchiveStore:
                 }
 
             for conversation in conversations:
-                if not conversation.provider:
-                    raise ValueError("Conversation provider must not be empty")
-                if not conversation.conversation_id:
-                    raise ValueError("Conversation id must not be empty")
-
-                if conversation.provider != source_provider:
-                    raise ValueError(
-                        "Imported conversation provider does not match source provider"
-                    )
+                _validate_conversation(conversation, source_provider)
 
                 canonical_conversation_id = _canonical_conversation_id(
                     conversation.provider, conversation.conversation_id
@@ -347,17 +392,6 @@ class ArchiveStore:
                 )
 
                 for message in conversation.messages:
-                    if message.provider != conversation.provider:
-                        raise ValueError(
-                            "Message provider does not match its conversation provider"
-                        )
-                    if message.conversation_id != conversation.conversation_id:
-                        raise ValueError(
-                            "Message conversation id does not match its conversation"
-                        )
-                    if not message.message_id:
-                        raise ValueError("Message id must not be empty")
-
                     canonical_message_id = _canonical_message_id(
                         message.provider, message.conversation_id, message.message_id
                     )
