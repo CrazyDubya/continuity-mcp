@@ -18,7 +18,7 @@ from continuity_mcp.models import CanonicalConversation
 _SEARCH_LIMIT_MAX = 50
 _CONVERSATION_LIMIT_MAX = 200
 _MESSAGE_CHARS_MAX = 20_000
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 1
 
 @dataclass(frozen=True, slots=True)
 class SourceRecord:
@@ -133,7 +133,7 @@ class ArchiveStore:
                     provider TEXT NOT NULL,
                     source_conversation_id TEXT NOT NULL,
                     source_id INTEGER REFERENCES sources(id),
-                    canonical_sha256 TEXT,
+                    canonical_sha256 TEXT NOT NULL,
                     title TEXT NOT NULL,
                     created_at REAL,
                     updated_at REAL,
@@ -144,10 +144,8 @@ class ArchiveStore:
                     id TEXT PRIMARY KEY,
                     conversation_id TEXT NOT NULL
                         REFERENCES conversations(id) ON DELETE CASCADE,
-                    provider TEXT NOT NULL,
                     source_message_id TEXT NOT NULL,
                     provider_message_id TEXT,
-                    source_id INTEGER REFERENCES sources(id),
                     role TEXT,
                     content TEXT NOT NULL,
                     created_at REAL,
@@ -160,9 +158,6 @@ class ArchiveStore:
                     ON messages(conversation_id);
                 CREATE INDEX IF NOT EXISTS idx_messages_created
                     ON messages(created_at);
-                CREATE INDEX IF NOT EXISTS idx_messages_provider_message
-                    ON messages(provider, provider_message_id);
-
                 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
                     content,
                     content='messages',
@@ -397,18 +392,16 @@ class ArchiveStore:
                     conn.execute(
                         """
                         INSERT INTO messages(
-                            id, conversation_id, provider, source_message_id,
-                            provider_message_id, source_id, role, content,
+                            id, conversation_id, source_message_id,
+                            provider_message_id, role, content,
                             created_at, updated_at, parent_message_id, children_json
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             canonical_message_id,
                             canonical_conversation_id,
-                            message.provider,
                             message.message_id,
                             message.provider_message_id,
-                            source_id,
                             message.role,
                             message.content,
                             message.created_at,
@@ -494,7 +487,7 @@ class ArchiveStore:
                 FROM messages_fts
                 JOIN messages m ON m.rowid = messages_fts.rowid
                 JOIN conversations c ON c.id = m.conversation_id
-                LEFT JOIN sources s ON s.id = m.source_id
+                LEFT JOIN sources s ON s.id = c.source_id
                 WHERE messages_fts MATCH ?
                 ORDER BY bm25_rank
                 LIMIT ?
@@ -596,7 +589,7 @@ class ArchiveStore:
                     s.sha256 AS source_sha256
                 FROM messages m
                 JOIN conversations c ON c.id = m.conversation_id
-                LEFT JOIN sources s ON s.id = m.source_id
+                LEFT JOIN sources s ON s.id = c.source_id
                 WHERE m.id = ?
                 """,
                 (start_char + 1, max_chars, message_id),
