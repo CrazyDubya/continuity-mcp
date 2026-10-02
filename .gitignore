@@ -216,3 +216,19 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# Continuity private/local state
+data/
+archives/
+imports/
+continuity-data/
+.continuity/
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+
+# Local model/index caches
+models/
+indexes/
