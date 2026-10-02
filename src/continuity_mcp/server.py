@@ -8,34 +8,71 @@ from continuity_mcp.store import ArchiveStore
 
 
 mcp = MCPServer("Continuity")
+_store_instance: ArchiveStore | None = None
+
+
+def _store() -> ArchiveStore:
+    global _store_instance
+    if _store_instance is None:
+        _store_instance = ArchiveStore()
+    return _store_instance
 
 
 @mcp.tool()
 def archive_status() -> dict[str, Any]:
-    """Return counts and providers available in the local Continuity archive."""
-    return ArchiveStore().status()
+    """Return provider and archive counts without exposing host filesystem paths."""
+    return _store().status()
 
 
 @mcp.tool()
 def archive_search(query: str, limit: int = 10) -> list[dict[str, Any]]:
-    """Search exact archived message text.
+    """Search archived messages and return bounded snippets with source IDs.
 
-    Results include canonical conversation and message identifiers so callers
-    can fetch source context rather than treating search hits as memory truth.
+    Search never returns whole messages. Use archive_message or
+    archive_conversation to retrieve bounded source text.
     """
-    return ArchiveStore().search(query, limit)
+    return _store().search(query, limit)
 
 
 @mcp.tool()
-def archive_conversation(conversation_id: str) -> dict[str, Any]:
-    """Return one canonical conversation and its exact imported messages."""
-    result = ArchiveStore().conversation(conversation_id)
+def archive_conversation(
+    conversation_id: str,
+    offset: int = 0,
+    limit: int = 50,
+    max_chars_per_message: int = 8_000,
+) -> dict[str, Any]:
+    """Return a bounded page of canonical messages from one conversation."""
+    result = _store().conversation(
+        conversation_id,
+        offset=offset,
+        limit=limit,
+        max_chars_per_message=max_chars_per_message,
+    )
     if result is None:
         return {"found": False, "conversation_id": conversation_id}
     return {"found": True, **result}
 
 
+@mcp.tool()
+def archive_message(
+    message_id: str,
+    start_char: int = 0,
+    max_chars: int = 8_000,
+) -> dict[str, Any]:
+    """Return a bounded exact character slice from one canonical message."""
+    result = _store().message(
+        message_id,
+        start_char=start_char,
+        max_chars=max_chars,
+    )
+    if result is None:
+        return {"found": False, "message_id": message_id}
+    return {"found": True, **result}
+
+
 def main() -> None:
+    # stdio is the local default. Remote serving stays out of scope until
+    # capability grants and authentication are implemented.
     mcp.run()
 
 
