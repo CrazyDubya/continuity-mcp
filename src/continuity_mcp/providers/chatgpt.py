@@ -128,7 +128,7 @@ def parse_chatgpt_export(data: Any) -> list[CanonicalConversation]:
     bounded by one conversation at a time.
     """
     if not isinstance(data, list):
-        raise ValueError("ChatGPT export must be a JSON array of conversations")
+        raise TypeError("ChatGPT export must be a JSON array of conversations")
 
     parsed: list[CanonicalConversation] = []
     for raw_conversation in data:
