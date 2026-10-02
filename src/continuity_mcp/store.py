@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import tempfile
 from collections.abc import Iterable
@@ -82,10 +83,10 @@ def _conversation_fingerprint(conversation: CanonicalConversation) -> str:
 def _fts_query(query: str) -> str:
     # Quoting the whitespace-delimited terms keeps user input out of FTS query
     # operators while retaining precise AND semantics for baseline retrieval.
-    terms = [term.strip() for term in query.split() if term.strip()]
+    terms = re.findall(r"[\w'-]+", query, flags=re.UNICODE)
     if not terms:
         raise ValueError("Search query must contain at least one searchable term")
-    return " ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in terms)
+    return " ".join(f'"{term}"' for term in terms)
 
 class ArchiveStore:
     def __init__(self, path: str | Path | None = None):
@@ -99,7 +100,7 @@ class ArchiveStore:
                 self.sources_dir.chmod(0o700)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path, timeout=30)
+        conn = sqlite3.connect(self.path, timeout=5.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA busy_timeout = 5000")
@@ -214,10 +215,10 @@ class ArchiveStore:
 
             sha256 = digest.hexdigest()
             stored = self.sources_dir / f"{sha256}.blob"
-            # Replace atomically even when the content-addressed path exists.
-            # This repairs a locally corrupted blob instead of trusting it only
-            # because its filename matches the expected digest.
-            os.replace(temporary, stored)
+            if stored.exists() and stored.stat().st_size == size_bytes:
+                temporary.unlink()
+            else:
+                os.replace(temporary, stored)
             if os.name != "nt":
                 stored.chmod(0o600)
         except BaseException:
@@ -232,10 +233,7 @@ class ArchiveStore:
                 INSERT INTO sources(
                     provider, sha256, original_name, size_bytes, stored_relpath
                 ) VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(provider, sha256) DO UPDATE SET
-                    original_name=excluded.original_name,
-                    size_bytes=excluded.size_bytes,
-                    stored_relpath=excluded.stored_relpath
+                ON CONFLICT(provider, sha256) DO NOTHING
                 """,
                 (
                     provider,
