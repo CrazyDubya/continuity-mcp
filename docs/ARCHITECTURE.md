@@ -19,10 +19,11 @@ normalization or model interpretation.
 
 ### L1 — canonical archive
 
-Provider-neutral conversations and messages live in SQLite. Provider IDs and
-graph links are preserved, but large provider-native raw trees are not copied
-into every canonical row. Canonical records retain a source relationship back
-to L0.
+Provider-neutral conversations and messages live in SQLite. Provider message
+identities are preserved. Provider structural nodes that do not contain a
+message remain in L0; L1 projects message-to-message parent/child links across
+those structural nodes so canonical links never point at missing messages.
+Canonical records retain a source relationship back to L0.
 
 ### L2 — rebuildable indexes
 
@@ -99,14 +100,3 @@ The first retrieval surface is deliberately small:
 
 All outputs are bounded. Higher-level memory tools should compose these
 primitives or query the same store rather than bypassing provenance.
-
-## Near-term evolution
-
-1. Extend the schema-version baseline with explicit migration steps before the first durable release.
-2. Make canonical message content multimodal rather than a text projection.
-3. Add provider adapter conformance fixtures.
-4. Add embeddings as an optional L2 index.
-5. Add episode/entity/assertion schemas as rebuildable L3 data.
-6. Add a retrieval planner and task-specific archive_context.
-7. Add capability grants and scoped remote MCP access.
-8. Add Claude/Codex/Hermes/Grok adapters without changing L1 semantics.
