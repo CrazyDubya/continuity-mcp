@@ -67,26 +67,31 @@ def _message_parent(mapping: dict[str, Any], node: dict[str, Any]) -> str | None
 
 def _message_children(mapping: dict[str, Any], node: dict[str, Any]) -> tuple[str, ...]:
     """Return nearest message-bearing descendants, skipping structural nodes."""
-    pending = list(node.get("children") or [])
     resolved: list[str] = []
     seen: set[str] = set()
 
-    while pending:
-        child_key = str(pending.pop(0))
-        if child_key in seen:
-            continue
-        seen.add(child_key)
+    def visit(node_id: Any) -> None:
+        node_key = str(node_id)
+        if node_key in seen:
+            return
+        seen.add(node_key)
 
-        child = mapping.get(child_key)
+        child = mapping.get(node_key)
         if not isinstance(child, dict):
-            continue
+            return
         if isinstance(child.get("message"), dict):
-            resolved.append(child_key)
-            continue
+            resolved.append(node_key)
+            return
 
         grandchildren = child.get("children") or []
         if isinstance(grandchildren, list):
-            pending.extend(grandchildren)
+            for grandchild in grandchildren:
+                visit(grandchild)
+
+    children = node.get("children") or []
+    if isinstance(children, list):
+        for child in children:
+            visit(child)
 
     return tuple(resolved)
 
