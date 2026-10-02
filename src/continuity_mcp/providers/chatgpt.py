@@ -131,7 +131,9 @@ def _parse_conversation(raw_conversation: Any) -> CanonicalConversation | None:
                     # canonical source identity for graph traversal.
                     message_id=str(node_id),
                     provider_message_id=(
-                        str(provider_message_id) if provider_message_id else None
+                        str(provider_message_id)
+                        if provider_message_id is not None
+                        else None
                     ),
                     role=role,
                     content=_content_to_text(raw_message.get("content")),
