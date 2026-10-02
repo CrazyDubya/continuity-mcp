@@ -39,8 +39,8 @@ must retain provenance to L0/L1.
 
 ### L4 — retrieval product
 
-Temporary answers and context packs assembled for an authorized caller and
-bounded by policy and token budget.
+Temporary answers and context packs assembled for a connected caller and
+bounded by the retrieval interface.
 
 ## Trust boundaries
 

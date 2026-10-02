@@ -46,6 +46,7 @@ def test_source_ingest_is_exact_and_content_addressed(tmp_path):
     source_file.write_bytes(source_bytes)
 
     source = store.ingest_source(source_file, provider="chatgpt")
+    source.path.write_bytes(b"x" * len(source_bytes))
     duplicate = store.ingest_source(source_file, provider="chatgpt")
 
     assert source.sha256 == duplicate.sha256

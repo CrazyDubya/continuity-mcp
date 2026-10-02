@@ -1,1 +1,1 @@
-"""Continuity MCP: user-owned conversation memory for authorized agents."""
+"""Continuity MCP: user-owned conversation memory for connected AI agents."""

@@ -1,8 +1,8 @@
 # Continuity MCP
 
-Self-hosted, provenance-preserving personal AI memory infrastructure with scoped MCP access across conversation archives.
+Self-hosted, provenance-preserving personal AI memory infrastructure with bounded read-only MCP access across conversation archives.
 
-Continuity is not an analytics dashboard and it is not a replacement for the original archive experiments. It is a clean successor focused on one job: keep a user's AI interaction history under the user's control and make the right parts of that history available to authorized agents.
+Continuity is not an analytics dashboard and it is not a replacement for the original archive experiments. It is a clean successor focused on one job: keep a user's AI interaction history under the user's control and make the right parts of that history available to connected agents through MCP.
 
 ## Core contract
 
@@ -13,7 +13,7 @@ Continuity keeps four layers deliberately separate:
 1. **Source truth** — exact imported provider exports, stored locally by content hash.
 2. **Canonical archive** — provider-neutral conversations, messages, branches, and provenance.
 3. **Derived memory** — rebuildable indexes and, later, episodes, entities, assertions, relationships, salience, and supersession.
-4. **Retrieved context** — temporary, task-specific context returned to an authorized agent.
+4. **Retrieved context** — temporary, task-specific context returned to a connected caller.
 
 Derived memory never replaces source truth. Every synthesized memory must ultimately be traceable back to imported source bytes.
 

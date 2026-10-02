@@ -101,7 +101,7 @@ def _parse_conversation(raw_conversation: Any) -> CanonicalConversation | None:
         return None
 
     conversation_id = raw_conversation.get("id")
-    if not conversation_id:
+    if conversation_id is None or conversation_id == "":
         return None
 
     title = raw_conversation.get("title") or "Untitled conversation"

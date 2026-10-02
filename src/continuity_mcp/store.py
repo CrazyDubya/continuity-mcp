@@ -34,7 +34,7 @@ def default_db_path() -> Path:
     return user_data_path("continuity-mcp", appauthor=False) / "continuity.sqlite3"
 
 def _id_component(value: str) -> str:
-    return quote(str(value), safe="")
+    return quote(value, safe="")
 
 
 def _canonical_conversation_id(provider: str, source_id: str) -> str:
@@ -131,8 +131,8 @@ def _conversation_fingerprint(conversation: CanonicalConversation) -> str:
 
 
 def _fts_query(query: str) -> str:
-    # Quoting the whitespace-delimited terms keeps user input out of FTS query
-    # operators while retaining precise AND semantics for baseline retrieval.
+    # Quote normalized lexical terms so user input cannot become FTS operators
+    # while retaining precise AND semantics for baseline retrieval.
     terms = re.findall(r"[\w'-]+", query, flags=re.UNICODE)
     if not terms:
         raise ValueError("Search query must contain at least one searchable term")
@@ -143,11 +143,16 @@ class ArchiveStore:
         self.path = Path(path).expanduser() if path else default_db_path()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.sources_dir = self.path.parent / "sources"
-        self._initialize()
+
         if os.name != "nt":
+            fd = os.open(self.path, os.O_CREAT | os.O_WRONLY, 0o600)
+            os.close(fd)
             self.path.chmod(0o600)
-            if self.sources_dir.exists():
-                self.sources_dir.chmod(0o700)
+
+        self._initialize()
+
+        if os.name != "nt" and self.sources_dir.exists():
+            self.sources_dir.chmod(0o700)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=5.0)
@@ -167,7 +172,6 @@ class ArchiveStore:
                     sha256 TEXT NOT NULL,
                     original_name TEXT NOT NULL,
                     size_bytes INTEGER NOT NULL,
-                    stored_relpath TEXT NOT NULL,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(provider, sha256)
                 );
@@ -237,11 +241,14 @@ class ArchiveStore:
 
     def ingest_source(self, source_path: str | Path, provider: str) -> SourceRecord:
         """Copy exact source bytes into content-addressed local storage."""
+        if not provider or not provider.strip():
+            raise ValueError("Provider must not be empty")
+
         source = Path(source_path).expanduser().resolve()
         if not source.is_file():
             raise FileNotFoundError(source)
 
-        self.sources_dir.mkdir(parents=True, exist_ok=True)
+        self.sources_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
         if os.name != "nt":
             self.sources_dir.chmod(0o700)
 
@@ -264,10 +271,10 @@ class ArchiveStore:
 
             sha256 = digest.hexdigest()
             stored = self.sources_dir / f"{sha256}.blob"
-            if stored.exists() and stored.stat().st_size == size_bytes:
-                temporary.unlink()
-            else:
-                os.replace(temporary, stored)
+            # The temporary file is already the exact, freshly hashed source.
+            # Replacing the content-addressed target repairs any local corruption
+            # without another copy of the source bytes.
+            os.replace(temporary, stored)
             if os.name != "nt":
                 stored.chmod(0o600)
         except BaseException:
@@ -275,38 +282,32 @@ class ArchiveStore:
                 temporary.unlink()
             raise
 
-        stored_relpath = str(stored.relative_to(self.path.parent))
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO sources(
-                    provider, sha256, original_name, size_bytes, stored_relpath
-                ) VALUES (?, ?, ?, ?, ?)
+                INSERT INTO sources(provider, sha256, original_name, size_bytes)
+                VALUES (?, ?, ?, ?)
                 ON CONFLICT(provider, sha256) DO NOTHING
                 """,
-                (
-                    provider,
-                    sha256,
-                    source.name,
-                    size_bytes,
-                    stored_relpath,
-                ),
+                (provider, sha256, source.name, size_bytes),
             )
             row = conn.execute(
                 """
-                SELECT id, sha256, size_bytes, stored_relpath
+                SELECT id, sha256, size_bytes
                 FROM sources
                 WHERE provider = ? AND sha256 = ?
                 """,
                 (provider, sha256),
             ).fetchone()
 
-        assert row is not None
+        if row is None:
+            raise RuntimeError("Failed to persist source metadata")
+
         return SourceRecord(
             id=row["id"],
             sha256=row["sha256"],
             size_bytes=row["size_bytes"],
-            path=self.path.parent / row["stored_relpath"],
+            path=self.sources_dir / f"{row['sha256']}.blob",
         )
 
     def import_conversations(
@@ -424,7 +425,7 @@ class ArchiveStore:
                             message.created_at,
                             message.updated_at,
                             parent_message_id,
-                            json.dumps(children_ids),
+                            json.dumps(children_ids, separators=(",", ":")),
                         ),
                     )
                     imported_messages += 1
@@ -496,7 +497,7 @@ class ArchiveStore:
                 FROM messages_fts
                 JOIN messages m ON m.rowid = messages_fts.rowid
                 JOIN conversations c ON c.id = m.conversation_id
-                LEFT JOIN sources s ON s.id = c.source_id
+                JOIN sources s ON s.id = c.source_id
                 WHERE messages_fts MATCH ?
                 ORDER BY bm25(messages_fts)
                 LIMIT ?
@@ -528,7 +529,7 @@ class ArchiveStore:
                     c.provider, c.source_conversation_id, c.title,
                     c.created_at, c.updated_at, s.sha256 AS source_sha256
                 FROM conversations c
-                LEFT JOIN sources s ON s.id = c.source_id
+                JOIN sources s ON s.id = c.source_id
                 WHERE c.id = ?
                 """,
                 (conversation_id,),
@@ -601,7 +602,7 @@ class ArchiveStore:
                     s.sha256 AS source_sha256
                 FROM messages m
                 JOIN conversations c ON c.id = m.conversation_id
-                LEFT JOIN sources s ON s.id = c.source_id
+                JOIN sources s ON s.id = c.source_id
                 WHERE m.id = ?
                 """,
                 (start_char + 1, max_chars, message_id),

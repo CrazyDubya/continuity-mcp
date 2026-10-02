@@ -95,7 +95,7 @@ def test_streaming_parser_matches_in_memory_parser(tmp_path):
 def test_parser_retains_non_string_parts_as_searchable_json():
     data = [
         {
-            "id": "conv-2",
+            "id": 0,
             "mapping": {
                 "n": {
                     "message": {
@@ -107,6 +107,8 @@ def test_parser_retains_non_string_parts_as_searchable_json():
             },
         }
     ]
-    message = parse_chatgpt_export(data)[0].messages[0]
+    conversation = parse_chatgpt_export(data)[0]
+    assert conversation.conversation_id == "0"
+    message = conversation.messages[0]
     assert message.provider_message_id == "0"
     assert '"kind": "tool"' in message.content
