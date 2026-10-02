@@ -98,6 +98,9 @@ def test_import_search_pagination_and_reimport_are_idempotent(tmp_path):
     assert "snippet" in hits[0]
     assert "content" not in hits[0]
 
+    punctuated_hits = store.search("episodic!!! memory???")
+    assert len(punctuated_hits) == 2
+
     conversation = store.conversation(
         "chatgpt:c1",
         limit=1,
