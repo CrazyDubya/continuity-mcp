@@ -467,18 +467,15 @@ class ArchiveStore:
                 "has_more": offset + len(messages) < message_count,
             }
         )
-        result["messages"] = [
-            {
-                **{
-                    key: row[key]
-                    for key in row
-                    if key != "children_json"
-                },
-                "content_truncated": row["content_length"] > max_chars_per_message,
-                "children_ids": json.loads(row["children_json"]),
-            }
-            for row in messages
-        ]
+        result["messages"] = []
+        for row in messages:
+            item = dict(row)
+            children_json = item.pop("children_json")
+            item["content_truncated"] = (
+                item["content_length"] > max_chars_per_message
+            )
+            item["children_ids"] = json.loads(children_json)
+            result["messages"].append(item)
         return result
 
     def message(
@@ -519,12 +516,9 @@ class ArchiveStore:
         if next_start >= content_length:
             next_start = None
 
-        result = {
-            key: row[key]
-            for key in row
-            if key != "children_json"
-        }
+        result = dict(row)
+        children_json = result.pop("children_json")
         result["start_char"] = start_char
         result["next_start_char"] = next_start
-        result["children_ids"] = json.loads(row["children_json"])
+        result["children_ids"] = json.loads(children_json)
         return result
