@@ -1,3 +1,6 @@
+import os
+import stat
+
 from continuity_mcp.models import CanonicalConversation, CanonicalMessage
 from continuity_mcp.store import ArchiveStore
 
@@ -43,6 +46,11 @@ def test_source_ingest_is_exact_and_content_addressed(tmp_path):
     assert source.id == duplicate.id
     assert source.path.read_bytes() == source_bytes
     assert source.path.parent == tmp_path / "sources"
+
+    if os.name != "nt":
+        assert stat.S_IMODE(source.path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(store.path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(source.path.parent.stat().st_mode) == 0o700
 
 
 def test_import_search_pagination_and_reimport_are_idempotent(tmp_path):
