@@ -62,16 +62,18 @@ def test_import_search_pagination_and_reimport_are_idempotent(tmp_path):
     assert first == {
         "conversations": 1,
         "messages": 2,
+        "unchanged_conversations": 0,
         "duplicate_source": False,
     }
     assert second == {
         "conversations": 1,
-        "messages": 2,
+        "messages": 0,
+        "unchanged_conversations": 1,
         "duplicate_source": False,
     }
 
     status = store.status()
-    assert status["schema_version"] == 1
+    assert status["schema_version"] == 2
     assert status["conversations"] == 1
     assert status["messages"] == 2
     assert "database" not in status
@@ -151,6 +153,7 @@ def test_duplicate_managed_source_skips_parser_iteration(tmp_path):
     assert duplicate == {
         "conversations": 0,
         "messages": 0,
+        "unchanged_conversations": 0,
         "duplicate_source": True,
     }
 
@@ -177,3 +180,23 @@ def test_canonical_ids_escape_provider_native_colons(tmp_path):
     hits = store.search("safe id")
     assert hits[0]["conversation_id"] == "chatgpt:conv%3Awith%3Acolons"
     assert hits[0]["message_id"] == "chatgpt:conv%3Awith%3Acolons:node%3A1"
+
+
+
+def test_force_reimport_bypasses_duplicate_and_fingerprint_shortcuts(tmp_path):
+    store = ArchiveStore(tmp_path / "archive.sqlite3")
+    source_file = tmp_path / "conversations.json"
+    source_file.write_text("[]", encoding="utf-8")
+    source = store.ingest_source(source_file, provider="chatgpt")
+
+    store.import_conversations([_conversation()], source_id=source.id)
+    forced = store.import_conversations(
+        [_conversation()],
+        source_id=source.id,
+        force_reimport=True,
+    )
+
+    assert forced["duplicate_source"] is False
+    assert forced["conversations"] == 1
+    assert forced["messages"] == 2
+    assert forced["unchanged_conversations"] == 0
