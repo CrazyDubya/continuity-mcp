@@ -44,6 +44,53 @@ def _content_to_text(content: Any) -> str:
 
     return json.dumps(content, ensure_ascii=False, sort_keys=True)
 
+def _message_parent(mapping: dict[str, Any], node: dict[str, Any]) -> str | None:
+    """Return the nearest message-bearing ancestor, skipping structural nodes."""
+    parent_id = node.get("parent")
+    seen: set[str] = set()
+
+    while parent_id is not None:
+        parent_key = str(parent_id)
+        if parent_key in seen:
+            return None
+        seen.add(parent_key)
+
+        parent = mapping.get(parent_key)
+        if not isinstance(parent, dict):
+            return None
+        if isinstance(parent.get("message"), dict):
+            return parent_key
+        parent_id = parent.get("parent")
+
+    return None
+
+
+def _message_children(mapping: dict[str, Any], node: dict[str, Any]) -> tuple[str, ...]:
+    """Return nearest message-bearing descendants, skipping structural nodes."""
+    pending = list(node.get("children") or [])
+    resolved: list[str] = []
+    seen: set[str] = set()
+
+    while pending:
+        child_key = str(pending.pop(0))
+        if child_key in seen:
+            continue
+        seen.add(child_key)
+
+        child = mapping.get(child_key)
+        if not isinstance(child, dict):
+            continue
+        if isinstance(child.get("message"), dict):
+            resolved.append(child_key)
+            continue
+
+        grandchildren = child.get("children") or []
+        if isinstance(grandchildren, list):
+            pending.extend(grandchildren)
+
+    return tuple(resolved)
+
+
 def _parse_conversation(raw_conversation: Any) -> CanonicalConversation | None:
     if not isinstance(raw_conversation, dict):
         return None
@@ -68,10 +115,6 @@ def _parse_conversation(raw_conversation: Any) -> CanonicalConversation | None:
             author = raw_message.get("author") or {}
             role = author.get("role") if isinstance(author, dict) else None
 
-            children = node.get("children") or []
-            if not isinstance(children, list):
-                children = []
-
             provider_message_id = raw_message.get("id")
 
             messages.append(
@@ -89,10 +132,8 @@ def _parse_conversation(raw_conversation: Any) -> CanonicalConversation | None:
                     content=_content_to_text(raw_message.get("content")),
                     created_at=_timestamp(raw_message.get("create_time")),
                     updated_at=_timestamp(raw_message.get("update_time")),
-                    parent_id=(
-                        str(node.get("parent")) if node.get("parent") is not None else None
-                    ),
-                    children_ids=tuple(str(item) for item in children),
+                    parent_id=_message_parent(mapping, node),
+                    children_ids=_message_children(mapping, node),
                 )
             )
 
