@@ -67,7 +67,10 @@ def parse_chatgpt_export(data: Any) -> list[CanonicalConversation]:
                 if not isinstance(raw_message, dict):
                     continue
 
-                message_id = raw_message.get("id") or node_id
+                # ChatGPT branch edges reference mapping node IDs, not the
+                # nested message.id value. Use the node ID as canonical graph
+                # identity and retain the complete nested message in raw.
+                message_id = node_id
                 author = raw_message.get("author") or {}
                 role = author.get("role") if isinstance(author, dict) else None
 
