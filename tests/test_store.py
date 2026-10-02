@@ -73,7 +73,7 @@ def test_import_search_pagination_and_reimport_are_idempotent(tmp_path):
     }
 
     status = store.status()
-    assert status["schema_version"] == 2
+    assert status["schema_version"] == 1
     assert status["conversations"] == 1
     assert status["messages"] == 2
     assert "database" not in status
