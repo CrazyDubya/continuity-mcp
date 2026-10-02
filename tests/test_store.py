@@ -200,3 +200,45 @@ def test_force_reimport_bypasses_duplicate_and_fingerprint_shortcuts(tmp_path):
     assert forced["conversations"] == 1
     assert forced["messages"] == 2
     assert forced["unchanged_conversations"] == 0
+
+
+
+def test_rejects_unversioned_pre_release_database(tmp_path):
+    path = tmp_path / "archive.sqlite3"
+
+    import sqlite3
+
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE conversations (id TEXT PRIMARY KEY)")
+
+    try:
+        ArchiveStore(path)
+    except RuntimeError as exc:
+        assert "Unversioned pre-release" in str(exc)
+    else:
+        raise AssertionError("expected incompatible database to be rejected")
+
+
+def test_rejects_message_with_mismatched_canonical_identity(tmp_path):
+    store = ArchiveStore(tmp_path / "archive.sqlite3")
+    conversation = CanonicalConversation(
+        provider="chatgpt",
+        conversation_id="c1",
+        title="Bad canonical record",
+        messages=(
+            CanonicalMessage(
+                provider="claude",
+                conversation_id="c1",
+                message_id="m1",
+                role="user",
+                content="wrong provider",
+            ),
+        ),
+    )
+
+    try:
+        store.import_conversations([conversation])
+    except ValueError as exc:
+        assert "provider does not match" in str(exc)
+    else:
+        raise AssertionError("expected invalid canonical record to be rejected")
