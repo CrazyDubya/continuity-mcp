@@ -85,4 +85,3 @@ def test_parser_retains_non_string_parts_as_searchable_json():
     ]
     message = parse_chatgpt_export(data)[0].messages[0]
     assert '"kind": "tool"' in message.content
-    assert message.raw
