@@ -10,12 +10,12 @@ Continuity is not an analytics dashboard and it is not a replacement for the ori
 
 Continuity keeps four layers deliberately separate:
 
-1. **Source truth** — immutable provider exports and exact source records.
-2. **Canonical archive** — provider-neutral conversations, messages, branches, artifacts, and metadata.
+1. **Source truth** — exact imported provider exports, stored locally by content hash.
+2. **Canonical archive** — provider-neutral conversations, messages, branches, and provenance.
 3. **Derived memory** — rebuildable indexes and, later, episodes, entities, assertions, relationships, salience, and supersession.
 4. **Retrieved context** — temporary, task-specific context returned to an authorized agent.
 
-Derived memory never replaces source truth. Every synthesized memory must be traceable back to source records.
+Derived memory never replaces source truth. Every synthesized memory must ultimately be traceable back to imported source bytes.
 
 ## Initial scope
 
@@ -24,24 +24,26 @@ The first complete path is intentionally small:
 ```
 ChatGPT conversations.json
         ↓
-ChatGPT provider adapter
+content-addressed source store
+        ↓
+streaming ChatGPT adapter
         ↓
 canonical conversations/messages
         ↓
-SQLite + FTS5
+SQLite + external-content FTS5
         ↓
-MCP tools
+bounded MCP tools
         ↓
 authorized agent
 ```
 
-The initial server exposes exact archive search and source retrieval. Learned semantic compilation, embeddings, temporal assertions, context-pack construction, provider ACLs, and additional provider adapters come next without changing the source layer.
+The initial server exposes source-linked archive search and bounded source retrieval. Learned semantic compilation, embeddings, temporal assertions, context-pack construction, provider ACLs, and additional provider adapters come later without changing the source layer.
 
 ## Local-first
 
-Archive exports can contain highly sensitive personal information. Continuity is designed to run locally by default. Raw archives, imported data directories, and local databases are gitignored.
+Archive exports can contain highly sensitive personal information. Continuity runs locally by default. Raw archives, managed source copies, local databases, model caches, and indexes are gitignored.
 
-No model call is required for ingestion or baseline retrieval.
+No model call is required for ingestion or baseline retrieval. Import is deliberately a local CLI action rather than an MCP tool, so a connected agent cannot select arbitrary host filesystem paths.
 
 ## Development
 
@@ -51,6 +53,7 @@ Requires Python 3.12+.
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+ruff check src tests
 pytest
 ```
 
@@ -59,6 +62,8 @@ Import a ChatGPT export:
 ```bash
 continuity import-chatgpt /path/to/conversations.json
 ```
+
+The file is copied byte-for-byte into Continuity's managed content-addressed source store before parsing. Large exports are then parsed one conversation at a time rather than loaded fully into memory.
 
 Run the MCP server over stdio:
 
@@ -76,17 +81,20 @@ The project targets the current stable v2 line of the official Python MCP SDK.
 
 ## MCP surface
 
-The bootstrap server starts with three bounded primitives:
+The bootstrap server exposes four read-only, bounded primitives:
 
-- `archive_status()` — report archive/provider counts.
-- `archive_search(query, limit)` — full-text search returning source-linked message hits.
-- `archive_conversation(conversation_id)` — fetch an exact canonical conversation with messages.
+- `archive_status()` — report provider/archive counts without exposing host paths.
+- `archive_search(query, limit)` — FTS search returning source-linked snippets, never whole messages.
+- `archive_conversation(conversation_id, offset, limit, max_chars_per_message)` — page through a conversation with bounded message content.
+- `archive_message(message_id, start_char, max_chars)` — retrieve exact message text in bounded character slices.
 
-Planned higher-level primitives include `archive_recall`, `archive_context`, `archive_timeline`, `archive_related`, and `archive_trace`.
+The intended higher-level surface includes `archive_recall`, `archive_context`, `archive_timeline`, `archive_related`, and `archive_trace`.
 
 ## Provider model
 
 Provider-specific formats stop at the adapter boundary. ChatGPT is only the first adapter. Claude, Codex, Grok, Hermes, and other archives should compile into the same canonical representation rather than leaking provider schemas into retrieval.
+
+For ChatGPT specifically, mapping node IDs are retained as canonical source identities because branch edges reference those IDs; nested provider message IDs are preserved separately.
 
 ## Legacy projects
 
