@@ -7,20 +7,16 @@ from mcp.server import MCPServer
 
 from continuity_mcp.store import ArchiveStore
 
-
 mcp = MCPServer("Continuity")
-
 
 @cache
 def _store() -> ArchiveStore:
     return ArchiveStore()
 
-
 @mcp.tool()
 def archive_status() -> dict[str, Any]:
     """Return provider and archive counts without exposing host filesystem paths."""
     return _store().status()
-
 
 @mcp.tool()
 def archive_search(query: str, limit: int = 10) -> list[dict[str, Any]]:
@@ -30,7 +26,6 @@ def archive_search(query: str, limit: int = 10) -> list[dict[str, Any]]:
     archive_conversation to retrieve bounded source text.
     """
     return _store().search(query, limit)
-
 
 @mcp.tool()
 def archive_conversation(
@@ -50,7 +45,6 @@ def archive_conversation(
         return {"found": False, "conversation_id": conversation_id}
     return {"found": True, **result}
 
-
 @mcp.tool()
 def archive_message(
     message_id: str,
@@ -67,12 +61,10 @@ def archive_message(
         return {"found": False, "message_id": message_id}
     return {"found": True, **result}
 
-
 def main() -> None:
     # stdio is the local default. Remote serving stays out of scope until
     # capability grants and authentication are implemented.
     mcp.run()
-
 
 if __name__ == "__main__":
     main()
