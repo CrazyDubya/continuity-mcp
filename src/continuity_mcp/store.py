@@ -124,8 +124,7 @@ class ArchiveStore:
 
                 CREATE TABLE IF NOT EXISTS imports (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    provider TEXT NOT NULL,
-                    source_id INTEGER REFERENCES sources(id),
+                    source_id INTEGER NOT NULL REFERENCES sources(id),
                     imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -133,7 +132,7 @@ class ArchiveStore:
                     id TEXT PRIMARY KEY,
                     provider TEXT NOT NULL,
                     source_conversation_id TEXT NOT NULL,
-                    source_id INTEGER REFERENCES sources(id),
+                    source_id INTEGER NOT NULL REFERENCES sources(id),
                     canonical_sha256 TEXT NOT NULL,
                     title TEXT NOT NULL,
                     created_at REAL,
@@ -266,35 +265,32 @@ class ArchiveStore:
         self,
         conversations: Iterable[CanonicalConversation],
         *,
-        source_id: int | None = None,
+        source_id: int,
         force_reimport: bool = False,
     ) -> dict[str, int | bool]:
         imported_conversations = 0
         imported_messages = 0
         unchanged_conversations = 0
-        provider_seen: str | None = None
 
         with self._connect() as conn:
-            source_provider: str | None = None
-            if source_id is not None:
-                source_row = conn.execute(
-                    "SELECT provider FROM sources WHERE id = ?", (source_id,)
-                ).fetchone()
-                if source_row is None:
-                    raise ValueError(f"Unknown source id: {source_id}")
-                source_provider = source_row["provider"]
+            source_row = conn.execute(
+                "SELECT provider FROM sources WHERE id = ?", (source_id,)
+            ).fetchone()
+            if source_row is None:
+                raise ValueError(f"Unknown source id: {source_id}")
+            source_provider = source_row["provider"]
 
-                already_imported = conn.execute(
-                    "SELECT 1 FROM imports WHERE source_id = ? LIMIT 1",
-                    (source_id,),
-                ).fetchone()
-                if already_imported is not None and not force_reimport:
-                    return {
-                        "conversations": 0,
-                        "messages": 0,
-                        "unchanged_conversations": 0,
-                        "duplicate_source": True,
-                    }
+            already_imported = conn.execute(
+                "SELECT 1 FROM imports WHERE source_id = ? LIMIT 1",
+                (source_id,),
+            ).fetchone()
+            if already_imported is not None and not force_reimport:
+                return {
+                    "conversations": 0,
+                    "messages": 0,
+                    "unchanged_conversations": 0,
+                    "duplicate_source": True,
+                }
 
             for conversation in conversations:
                 if not conversation.provider:
@@ -302,12 +298,7 @@ class ArchiveStore:
                 if not conversation.conversation_id:
                     raise ValueError("Conversation id must not be empty")
 
-                provider_seen = provider_seen or conversation.provider
-                if conversation.provider != provider_seen:
-                    raise ValueError(
-                        "One import transaction must contain a single provider"
-                    )
-                if source_provider and conversation.provider != source_provider:
+                if conversation.provider != source_provider:
                     raise ValueError(
                         "Imported conversation provider does not match source provider"
                     )
@@ -411,15 +402,10 @@ class ArchiveStore:
 
                 imported_conversations += 1
 
-            import_provider = provider_seen or source_provider
-            if import_provider:
-                conn.execute(
-                    """
-                    INSERT INTO imports(provider, source_id)
-                    VALUES (?, ?)
-                    """,
-                    (import_provider, source_id),
-                )
+            conn.execute(
+                "INSERT INTO imports(source_id) VALUES (?)",
+                (source_id,),
+            )
 
         return {
             "conversations": imported_conversations,
