@@ -5,9 +5,10 @@ import json
 import os
 import sqlite3
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from platformdirs import user_data_path
 
