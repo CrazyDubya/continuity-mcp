@@ -492,7 +492,8 @@ class ArchiveStore:
             conversation = conn.execute(
                 """
                 SELECT
-                    c.id, c.provider, c.source_conversation_id, c.title,
+                    c.id AS conversation_id,
+                    c.provider, c.source_conversation_id, c.title,
                     c.created_at, c.updated_at, s.sha256 AS source_sha256
                 FROM conversations c
                 LEFT JOIN sources s ON s.id = c.source_id
@@ -511,7 +512,8 @@ class ArchiveStore:
             messages = conn.execute(
                 """
                 SELECT
-                    id, source_message_id, provider_message_id, role,
+                    id AS message_id,
+                    source_message_id, provider_message_id, role,
                     substr(content, 1, ?) AS content,
                     length(content) AS content_length,
                     created_at, updated_at, parent_message_id, children_json
@@ -557,7 +559,8 @@ class ArchiveStore:
             row = conn.execute(
                 """
                 SELECT
-                    m.id, m.conversation_id, c.provider, c.title,
+                    m.id AS message_id,
+                    m.conversation_id, c.provider, c.title,
                     m.source_message_id, m.provider_message_id, m.role,
                     substr(m.content, ?, ?) AS content,
                     length(m.content) AS content_length,
