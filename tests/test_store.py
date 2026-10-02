@@ -33,6 +33,12 @@ def _conversation() -> CanonicalConversation:
     )
 
 
+def _source(store: ArchiveStore, tmp_path, name: str, content: str):
+    path = tmp_path / name
+    path.write_text(content, encoding="utf-8")
+    return store.ingest_source(path, provider="chatgpt")
+
+
 def test_source_ingest_is_exact_and_content_addressed(tmp_path):
     store = ArchiveStore(tmp_path / "archive.sqlite3")
     source_file = tmp_path / "conversations.json"
@@ -56,8 +62,17 @@ def test_source_ingest_is_exact_and_content_addressed(tmp_path):
 def test_import_search_pagination_and_reimport_are_idempotent(tmp_path):
     store = ArchiveStore(tmp_path / "archive.sqlite3")
 
-    first = store.import_conversations([_conversation()])
-    second = store.import_conversations([_conversation()])
+    first_source = _source(store, tmp_path, "export-1.json", "[1]")
+    second_source = _source(store, tmp_path, "export-2.json", "[2]")
+
+    first = store.import_conversations(
+        [_conversation()],
+        source_id=first_source.id,
+    )
+    second = store.import_conversations(
+        [_conversation()],
+        source_id=second_source.id,
+    )
 
     assert first == {
         "conversations": 1,
@@ -119,7 +134,8 @@ def test_message_slices_large_content_without_losing_exact_text(tmp_path):
             ),
         ),
     )
-    store.import_conversations([conversation])
+    source = _source(store, tmp_path, "large.json", "[]")
+    store.import_conversations([conversation], source_id=source.id)
 
     first = store.message("chatgpt:large:m1", max_chars=256)
     assert first is not None
@@ -175,7 +191,8 @@ def test_canonical_ids_escape_provider_native_colons(tmp_path):
         ),
     )
 
-    store.import_conversations([conversation])
+    source = _source(store, tmp_path, "ids.json", "[]")
+    store.import_conversations([conversation], source_id=source.id)
 
     hits = store.search("safe id")
     assert hits[0]["conversation_id"] == "chatgpt:conv%3Awith%3Acolons"
@@ -221,7 +238,8 @@ def test_rejects_message_with_mismatched_canonical_identity(tmp_path):
     )
 
     try:
-        store.import_conversations([conversation])
+        source = _source(store, tmp_path, "invalid.json", "[]")
+        store.import_conversations([conversation], source_id=source.id)
     except ValueError as exc:
         assert "provider does not match" in str(exc)
     else:
