@@ -63,7 +63,7 @@ Import a ChatGPT export:
 continuity import-chatgpt /path/to/conversations.json
 ```
 
-The file is copied byte-for-byte into Continuity's managed content-addressed source store before parsing. Large exports are then parsed one conversation at a time rather than loaded fully into memory.
+The file is copied byte-for-byte into Continuity's managed content-addressed source store before parsing. Large exports are then parsed one conversation at a time rather than loaded fully into memory. Re-importing the exact same source is skipped by default; changed cumulative exports fingerprint each canonical conversation and only rewrite conversations whose canonical content changed. Use `--force` when intentionally rebuilding canonical records after an adapter change.
 
 Run the MCP server over stdio:
 
@@ -94,7 +94,7 @@ The intended higher-level surface includes `archive_recall`, `archive_context`, 
 
 Provider-specific formats stop at the adapter boundary. ChatGPT is only the first adapter. Claude, Codex, Grok, Hermes, and other archives should compile into the same canonical representation rather than leaking provider schemas into retrieval.
 
-For ChatGPT specifically, mapping node IDs are retained as canonical source identities because branch edges reference those IDs; nested provider message IDs are preserved separately.
+For ChatGPT specifically, mapping node IDs are retained as canonical source identities because branch edges reference those IDs; nested provider message IDs are preserved separately. Provider-native identifier components are percent-escaped before composition so canonical IDs remain collision-safe even when a future provider uses colons or other delimiters.
 
 ## Legacy projects
 
