@@ -93,7 +93,6 @@ def _parse_conversation(raw_conversation: Any) -> CanonicalConversation | None:
                         str(node.get("parent")) if node.get("parent") is not None else None
                     ),
                     children_ids=tuple(str(item) for item in children),
-                    raw={"node_id": node_id, "node": node},
                 )
             )
 
@@ -112,7 +111,6 @@ def _parse_conversation(raw_conversation: Any) -> CanonicalConversation | None:
         messages=tuple(messages),
         created_at=_timestamp(raw_conversation.get("create_time")),
         updated_at=_timestamp(raw_conversation.get("update_time")),
-        raw=raw_conversation,
     )
 
 def parse_chatgpt_export(data: Any) -> list[CanonicalConversation]:
