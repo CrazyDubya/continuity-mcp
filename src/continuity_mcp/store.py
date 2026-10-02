@@ -57,9 +57,12 @@ def _fts_query(query: str) -> str:
 class ArchiveStore:
     def __init__(self, path: str | Path | None = None):
         self.path = Path(path).expanduser() if path else default_db_path()
+        new_database = not self.path.exists()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.sources_dir = self.path.parent / "sources"
         self._initialize()
+        if new_database and os.name != "nt":
+            self.path.chmod(0o600)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=30)
@@ -157,7 +160,11 @@ class ArchiveStore:
         if not source.is_file():
             raise FileNotFoundError(source)
 
+        new_sources_dir = not self.sources_dir.exists()
         self.sources_dir.mkdir(parents=True, exist_ok=True)
+        if new_sources_dir and os.name != "nt":
+            self.sources_dir.chmod(0o700)
+
         digest = hashlib.sha256()
         size_bytes = 0
 
@@ -179,6 +186,8 @@ class ArchiveStore:
                 temporary.unlink()
             else:
                 os.replace(temporary, stored)
+                if os.name != "nt":
+                    stored.chmod(0o600)
         except BaseException:
             if temporary.exists():
                 temporary.unlink()
