@@ -468,7 +468,7 @@ class ArchiveStore:
             {
                 **{
                     key: row[key]
-                    for key in row.keys()
+                    for key in row
                     if key != "children_json"
                 },
                 "content_truncated": row["content_length"] > max_chars_per_message,
@@ -518,7 +518,7 @@ class ArchiveStore:
 
         result = {
             key: row[key]
-            for key in row.keys()
+            for key in row
             if key != "children_json"
         }
         result["start_char"] = start_char
