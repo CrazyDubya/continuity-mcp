@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,7 +15,6 @@ class CanonicalMessage:
     updated_at: float | None = None
     parent_id: str | None = None
     children_ids: tuple[str, ...] = ()
-    raw: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,4 +25,3 @@ class CanonicalConversation:
     messages: tuple[CanonicalMessage, ...]
     created_at: float | None = None
     updated_at: float | None = None
-    raw: dict[str, Any] = field(default_factory=dict)
