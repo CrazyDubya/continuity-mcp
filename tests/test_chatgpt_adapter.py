@@ -13,9 +13,14 @@ def _sample_export():
             "title": "Branch test",
             "create_time": 1.0,
             "mapping": {
-                "node-user": {
+                "root": {
                     "parent": None,
-                    "children": ["node-a", "node-b"],
+                    "children": ["node-user"],
+                    "message": None,
+                },
+                "node-user": {
+                    "parent": "root",
+                    "children": ["bridge", "node-b", "missing-node"],
                     "message": {
                         "id": "msg-user",
                         "author": {"role": "user"},
@@ -23,8 +28,13 @@ def _sample_export():
                         "content": {"parts": ["Pick a path"]},
                     },
                 },
-                "node-a": {
+                "bridge": {
                     "parent": "node-user",
+                    "children": ["node-a"],
+                    "message": None,
+                },
+                "node-a": {
+                    "parent": "bridge",
                     "children": [],
                     "message": {
                         "id": "msg-a",
@@ -33,10 +43,19 @@ def _sample_export():
                         "content": {"parts": ["Path A"]},
                     },
                 },
+                "node-b": {
+                    "parent": "node-user",
+                    "children": [],
+                    "message": {
+                        "id": "msg-b",
+                        "author": {"role": "assistant"},
+                        "create_time": 4.0,
+                        "content": {"parts": ["Path B"]},
+                    },
+                },
             },
         }
     ]
-
 
 def test_parser_preserves_branch_graph_and_provider_identity():
     conversations = parse_chatgpt_export(_sample_export())
@@ -44,18 +63,23 @@ def test_parser_preserves_branch_graph_and_provider_identity():
     assert len(conversations) == 1
     conversation = conversations[0]
     assert conversation.conversation_id == "conv-1"
-    assert len(conversation.messages) == 2
+    assert len(conversation.messages) == 3
 
     first = conversation.messages[0]
     assert first.message_id == "node-user"
     assert first.provider_message_id == "msg-user"
     assert first.content == "Pick a path"
+    assert first.parent_id is None
     assert first.children_ids == ("node-a", "node-b")
 
     second = conversation.messages[1]
     assert second.message_id == "node-a"
     assert second.provider_message_id == "msg-a"
     assert second.parent_id == "node-user"
+
+    third = conversation.messages[2]
+    assert third.message_id == "node-b"
+    assert third.parent_id == "node-user"
 
 
 def test_streaming_parser_matches_in_memory_parser(tmp_path):
