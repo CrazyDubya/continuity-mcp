@@ -434,10 +434,8 @@ class ArchiveStore:
             import_count = conn.execute(
                 "SELECT COUNT(*) FROM imports"
             ).fetchone()[0]
-            schema_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
 
         return {
-            "schema_version": schema_version,
             "providers": providers,
             "conversations": conversation_count,
             "messages": message_count,
@@ -461,14 +459,13 @@ class ArchiveStore:
                     snippet(messages_fts, 0, '', '', ' … ', 32) AS snippet,
                     length(m.content) AS content_length,
                     m.created_at,
-                    s.sha256 AS source_sha256,
-                    bm25(messages_fts) AS bm25_rank
+                    s.sha256 AS source_sha256
                 FROM messages_fts
                 JOIN messages m ON m.rowid = messages_fts.rowid
                 JOIN conversations c ON c.id = m.conversation_id
                 LEFT JOIN sources s ON s.id = c.source_id
                 WHERE messages_fts MATCH ?
-                ORDER BY bm25_rank
+                ORDER BY bm25(messages_fts)
                 LIMIT ?
                 """,
                 (match_query, limit),
