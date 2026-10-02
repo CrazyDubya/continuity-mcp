@@ -9,6 +9,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from platformdirs import user_data_path
 
@@ -17,6 +18,7 @@ from continuity_mcp.models import CanonicalConversation
 _SEARCH_LIMIT_MAX = 50
 _CONVERSATION_LIMIT_MAX = 200
 _MESSAGE_CHARS_MAX = 20_000
+_SCHEMA_VERSION = 1
 
 @dataclass(frozen=True, slots=True)
 class SourceRecord:
@@ -33,11 +35,19 @@ def default_db_path() -> Path:
         return Path(configured).expanduser()
     return user_data_path("continuity-mcp", appauthor=False) / "continuity.sqlite3"
 
+def _id_component(value: str) -> str:
+    return quote(str(value), safe="")
+
+
 def _canonical_conversation_id(provider: str, source_id: str) -> str:
-    return f"{provider}:{source_id}"
+    return f"{_id_component(provider)}:{_id_component(source_id)}"
+
 
 def _canonical_message_id(provider: str, conversation_id: str, source_id: str) -> str:
-    return f"{provider}:{conversation_id}:{source_id}"
+    return (
+        f"{_id_component(provider)}:{_id_component(conversation_id)}:"
+        f"{_id_component(source_id)}"
+    )
 
 def _fts_query(query: str) -> str:
     # Quoting the whitespace-delimited terms keeps user input out of FTS query
@@ -50,12 +60,13 @@ def _fts_query(query: str) -> str:
 class ArchiveStore:
     def __init__(self, path: str | Path | None = None):
         self.path = Path(path).expanduser() if path else default_db_path()
-        new_database = not self.path.exists()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.sources_dir = self.path.parent / "sources"
         self._initialize()
-        if new_database and os.name != "nt":
+        if os.name != "nt":
             self.path.chmod(0o600)
+            if self.sources_dir.exists():
+                self.sources_dir.chmod(0o700)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=30)
@@ -66,6 +77,13 @@ class ArchiveStore:
 
     def _initialize(self) -> None:
         with self._connect() as conn:
+            version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            if version > _SCHEMA_VERSION:
+                raise RuntimeError(
+                    f"Database schema version {version} is newer than this build "
+                    f"(supports {_SCHEMA_VERSION})."
+                )
+
             conn.execute("PRAGMA journal_mode = WAL")
             conn.executescript(
                 """
@@ -146,6 +164,8 @@ class ArchiveStore:
                 END;
                 """
             )
+            if version < _SCHEMA_VERSION:
+                conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
 
     def ingest_source(self, source_path: str | Path, provider: str) -> SourceRecord:
         """Copy exact source bytes into content-addressed local storage."""
@@ -153,9 +173,8 @@ class ArchiveStore:
         if not source.is_file():
             raise FileNotFoundError(source)
 
-        new_sources_dir = not self.sources_dir.exists()
         self.sources_dir.mkdir(parents=True, exist_ok=True)
-        if new_sources_dir and os.name != "nt":
+        if os.name != "nt":
             self.sources_dir.chmod(0o700)
 
         digest = hashlib.sha256()
@@ -172,15 +191,17 @@ class ArchiveStore:
                     digest.update(block)
                     size_bytes += len(block)
                     output_file.write(block)
+                output_file.flush()
+                os.fsync(output_file.fileno())
 
             sha256 = digest.hexdigest()
             stored = self.sources_dir / f"{sha256}.blob"
-            if stored.exists():
-                temporary.unlink()
-            else:
-                os.replace(temporary, stored)
-                if os.name != "nt":
-                    stored.chmod(0o600)
+            # Replace atomically even when the content-addressed path exists.
+            # This repairs a locally corrupted blob instead of trusting it only
+            # because its filename matches the expected digest.
+            os.replace(temporary, stored)
+            if os.name != "nt":
+                stored.chmod(0o600)
         except BaseException:
             if temporary.exists():
                 temporary.unlink()
@@ -230,7 +251,7 @@ class ArchiveStore:
         conversations: Iterable[CanonicalConversation],
         *,
         source_id: int | None = None,
-    ) -> dict[str, int]:
+    ) -> dict[str, int | bool]:
         imported_conversations = 0
         imported_messages = 0
         provider_seen: str | None = None
@@ -244,6 +265,17 @@ class ArchiveStore:
                 if source_row is None:
                     raise ValueError(f"Unknown source id: {source_id}")
                 source_provider = source_row["provider"]
+
+                already_imported = conn.execute(
+                    "SELECT 1 FROM imports WHERE source_id = ? LIMIT 1",
+                    (source_id,),
+                ).fetchone()
+                if already_imported is not None:
+                    return {
+                        "conversations": 0,
+                        "messages": 0,
+                        "duplicate_source": True,
+                    }
 
             for conversation in conversations:
                 provider_seen = provider_seen or conversation.provider
@@ -343,6 +375,7 @@ class ArchiveStore:
         return {
             "conversations": imported_conversations,
             "messages": imported_messages,
+            "duplicate_source": False,
         }
 
     def status(self) -> dict[str, Any]:
@@ -371,6 +404,7 @@ class ArchiveStore:
             ).fetchone()[0]
 
         return {
+            "schema_version": _SCHEMA_VERSION,
             "providers": providers,
             "conversations": conversation_count,
             "messages": message_count,
