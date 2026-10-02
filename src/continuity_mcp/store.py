@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import tempfile
 from collections.abc import Iterable
@@ -18,14 +19,11 @@ from continuity_mcp.models import CanonicalConversation
 _SEARCH_LIMIT_MAX = 50
 _CONVERSATION_LIMIT_MAX = 200
 _MESSAGE_CHARS_MAX = 20_000
-_SCHEMA_VERSION = 2
 
 @dataclass(frozen=True, slots=True)
 class SourceRecord:
     id: int
-    provider: str
     sha256: str
-    original_name: str
     size_bytes: int
     path: Path
 
@@ -48,6 +46,59 @@ def _canonical_message_id(provider: str, conversation_id: str, source_id: str) -
         f"{_id_component(provider)}:{_id_component(conversation_id)}:"
         f"{_id_component(source_id)}"
     )
+
+def _validate_conversation(
+    conversation: CanonicalConversation,
+    source_provider: str,
+) -> None:
+    if not conversation.provider:
+        raise ValueError("Conversation provider must not be empty")
+    if conversation.provider != source_provider:
+        raise ValueError("Imported conversation provider does not match source provider")
+    if not conversation.conversation_id:
+        raise ValueError("Conversation id must not be empty")
+
+    messages_by_id = {}
+    for message in conversation.messages:
+        if message.provider != conversation.provider:
+            raise ValueError(
+                "Message provider does not match its conversation provider"
+            )
+        if message.conversation_id != conversation.conversation_id:
+            raise ValueError(
+                "Message conversation id does not match its conversation"
+            )
+        if not message.message_id:
+            raise ValueError("Message id must not be empty")
+        if message.message_id in messages_by_id:
+            raise ValueError(f"Duplicate message id: {message.message_id}")
+        messages_by_id[message.message_id] = message
+
+    for message in conversation.messages:
+        if message.parent_id is not None:
+            parent = messages_by_id.get(message.parent_id)
+            if parent is None:
+                raise ValueError(
+                    f"Unknown parent message id {message.parent_id!r} "
+                    f"for {message.message_id!r}"
+                )
+            if message.message_id not in parent.children_ids:
+                raise ValueError(
+                    f"Parent/child mismatch for {message.message_id!r}"
+                )
+
+        for child_id in message.children_ids:
+            child = messages_by_id.get(child_id)
+            if child is None:
+                raise ValueError(
+                    f"Unknown child message id {child_id!r} "
+                    f"for {message.message_id!r}"
+                )
+            if child.parent_id != message.message_id:
+                raise ValueError(
+                    f"Parent/child mismatch for {child_id!r}"
+                )
+
 
 def _conversation_fingerprint(conversation: CanonicalConversation) -> str:
     payload = {
@@ -82,10 +133,10 @@ def _conversation_fingerprint(conversation: CanonicalConversation) -> str:
 def _fts_query(query: str) -> str:
     # Quoting the whitespace-delimited terms keeps user input out of FTS query
     # operators while retaining precise AND semantics for baseline retrieval.
-    terms = [term.strip() for term in query.split() if term.strip()]
+    terms = re.findall(r"[\w'-]+", query, flags=re.UNICODE)
     if not terms:
         raise ValueError("Search query must contain at least one searchable term")
-    return " ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in terms)
+    return " ".join(f'"{term}"' for term in terms)
 
 class ArchiveStore:
     def __init__(self, path: str | Path | None = None):
@@ -99,7 +150,7 @@ class ArchiveStore:
                 self.sources_dir.chmod(0o700)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path, timeout=30)
+        conn = sqlite3.connect(self.path, timeout=5.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA busy_timeout = 5000")
@@ -107,13 +158,6 @@ class ArchiveStore:
 
     def _initialize(self) -> None:
         with self._connect() as conn:
-            version = int(conn.execute("PRAGMA user_version").fetchone()[0])
-            if version > _SCHEMA_VERSION:
-                raise RuntimeError(
-                    f"Database schema version {version} is newer than this build "
-                    f"(supports {_SCHEMA_VERSION})."
-                )
-
             conn.execute("PRAGMA journal_mode = WAL")
             conn.executescript(
                 """
@@ -130,17 +174,19 @@ class ArchiveStore:
 
                 CREATE TABLE IF NOT EXISTS imports (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    provider TEXT NOT NULL,
-                    source_id INTEGER REFERENCES sources(id),
+                    source_id INTEGER NOT NULL REFERENCES sources(id),
                     imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+
+                CREATE INDEX IF NOT EXISTS idx_imports_source
+                    ON imports(source_id);
 
                 CREATE TABLE IF NOT EXISTS conversations (
                     id TEXT PRIMARY KEY,
                     provider TEXT NOT NULL,
                     source_conversation_id TEXT NOT NULL,
-                    source_id INTEGER REFERENCES sources(id),
-                    canonical_sha256 TEXT,
+                    source_id INTEGER NOT NULL REFERENCES sources(id),
+                    canonical_sha256 TEXT NOT NULL,
                     title TEXT NOT NULL,
                     created_at REAL,
                     updated_at REAL,
@@ -151,10 +197,8 @@ class ArchiveStore:
                     id TEXT PRIMARY KEY,
                     conversation_id TEXT NOT NULL
                         REFERENCES conversations(id) ON DELETE CASCADE,
-                    provider TEXT NOT NULL,
                     source_message_id TEXT NOT NULL,
                     provider_message_id TEXT,
-                    source_id INTEGER REFERENCES sources(id),
                     role TEXT,
                     content TEXT NOT NULL,
                     created_at REAL,
@@ -165,11 +209,6 @@ class ArchiveStore:
 
                 CREATE INDEX IF NOT EXISTS idx_messages_conversation
                     ON messages(conversation_id);
-                CREATE INDEX IF NOT EXISTS idx_messages_created
-                    ON messages(created_at);
-                CREATE INDEX IF NOT EXISTS idx_messages_provider_message
-                    ON messages(provider, provider_message_id);
-
                 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
                     content,
                     content='messages',
@@ -195,18 +234,6 @@ class ArchiveStore:
                 END;
                 """
             )
-
-            conversation_columns = {
-                row["name"]
-                for row in conn.execute("PRAGMA table_info(conversations)")
-            }
-            if "canonical_sha256" not in conversation_columns:
-                conn.execute(
-                    "ALTER TABLE conversations ADD COLUMN canonical_sha256 TEXT"
-                )
-
-            if version < _SCHEMA_VERSION:
-                conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
 
     def ingest_source(self, source_path: str | Path, provider: str) -> SourceRecord:
         """Copy exact source bytes into content-addressed local storage."""
@@ -237,10 +264,10 @@ class ArchiveStore:
 
             sha256 = digest.hexdigest()
             stored = self.sources_dir / f"{sha256}.blob"
-            # Replace atomically even when the content-addressed path exists.
-            # This repairs a locally corrupted blob instead of trusting it only
-            # because its filename matches the expected digest.
-            os.replace(temporary, stored)
+            if stored.exists() and stored.stat().st_size == size_bytes:
+                temporary.unlink()
+            else:
+                os.replace(temporary, stored)
             if os.name != "nt":
                 stored.chmod(0o600)
         except BaseException:
@@ -255,10 +282,7 @@ class ArchiveStore:
                 INSERT INTO sources(
                     provider, sha256, original_name, size_bytes, stored_relpath
                 ) VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(provider, sha256) DO UPDATE SET
-                    original_name=excluded.original_name,
-                    size_bytes=excluded.size_bytes,
-                    stored_relpath=excluded.stored_relpath
+                ON CONFLICT(provider, sha256) DO NOTHING
                 """,
                 (
                     provider,
@@ -270,7 +294,7 @@ class ArchiveStore:
             )
             row = conn.execute(
                 """
-                SELECT id, provider, sha256, original_name, size_bytes, stored_relpath
+                SELECT id, sha256, size_bytes, stored_relpath
                 FROM sources
                 WHERE provider = ? AND sha256 = ?
                 """,
@@ -280,9 +304,7 @@ class ArchiveStore:
         assert row is not None
         return SourceRecord(
             id=row["id"],
-            provider=row["provider"],
             sha256=row["sha256"],
-            original_name=row["original_name"],
             size_bytes=row["size_bytes"],
             path=self.path.parent / row["stored_relpath"],
         )
@@ -291,46 +313,35 @@ class ArchiveStore:
         self,
         conversations: Iterable[CanonicalConversation],
         *,
-        source_id: int | None = None,
+        source_id: int,
         force_reimport: bool = False,
     ) -> dict[str, int | bool]:
         imported_conversations = 0
         imported_messages = 0
         unchanged_conversations = 0
-        provider_seen: str | None = None
 
         with self._connect() as conn:
-            source_provider: str | None = None
-            if source_id is not None:
-                source_row = conn.execute(
-                    "SELECT provider FROM sources WHERE id = ?", (source_id,)
-                ).fetchone()
-                if source_row is None:
-                    raise ValueError(f"Unknown source id: {source_id}")
-                source_provider = source_row["provider"]
+            source_row = conn.execute(
+                "SELECT provider FROM sources WHERE id = ?", (source_id,)
+            ).fetchone()
+            if source_row is None:
+                raise ValueError(f"Unknown source id: {source_id}")
+            source_provider = source_row["provider"]
 
-                already_imported = conn.execute(
-                    "SELECT 1 FROM imports WHERE source_id = ? LIMIT 1",
-                    (source_id,),
-                ).fetchone()
-                if already_imported is not None and not force_reimport:
-                    return {
-                        "conversations": 0,
-                        "messages": 0,
-                        "unchanged_conversations": 0,
-                        "duplicate_source": True,
-                    }
+            already_imported = conn.execute(
+                "SELECT 1 FROM imports WHERE source_id = ? LIMIT 1",
+                (source_id,),
+            ).fetchone()
+            if already_imported is not None and not force_reimport:
+                return {
+                    "conversations": 0,
+                    "messages": 0,
+                    "unchanged_conversations": 0,
+                    "duplicate_source": True,
+                }
 
             for conversation in conversations:
-                provider_seen = provider_seen or conversation.provider
-                if conversation.provider != provider_seen:
-                    raise ValueError(
-                        "One import transaction must contain a single provider"
-                    )
-                if source_provider and conversation.provider != source_provider:
-                    raise ValueError(
-                        "Imported conversation provider does not match source provider"
-                    )
+                _validate_conversation(conversation, source_provider)
 
                 canonical_conversation_id = _canonical_conversation_id(
                     conversation.provider, conversation.conversation_id
@@ -346,7 +357,6 @@ class ArchiveStore:
                     and existing["canonical_sha256"] == canonical_sha256
                     and not force_reimport
                 ):
-                    imported_conversations += 1
                     unchanged_conversations += 1
                     continue
 
@@ -399,18 +409,16 @@ class ArchiveStore:
                     conn.execute(
                         """
                         INSERT INTO messages(
-                            id, conversation_id, provider, source_message_id,
-                            provider_message_id, source_id, role, content,
+                            id, conversation_id, source_message_id,
+                            provider_message_id, role, content,
                             created_at, updated_at, parent_message_id, children_json
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             canonical_message_id,
                             canonical_conversation_id,
-                            message.provider,
                             message.message_id,
                             message.provider_message_id,
-                            source_id,
                             message.role,
                             message.content,
                             message.created_at,
@@ -423,15 +431,10 @@ class ArchiveStore:
 
                 imported_conversations += 1
 
-            import_provider = provider_seen or source_provider
-            if import_provider:
-                conn.execute(
-                    """
-                    INSERT INTO imports(provider, source_id)
-                    VALUES (?, ?)
-                    """,
-                    (import_provider, source_id),
-                )
+            conn.execute(
+                "INSERT INTO imports(source_id) VALUES (?)",
+                (source_id,),
+            )
 
         return {
             "conversations": imported_conversations,
@@ -464,10 +467,8 @@ class ArchiveStore:
             import_count = conn.execute(
                 "SELECT COUNT(*) FROM imports"
             ).fetchone()[0]
-            schema_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
 
         return {
-            "schema_version": schema_version,
             "providers": providers,
             "conversations": conversation_count,
             "messages": message_count,
@@ -491,14 +492,13 @@ class ArchiveStore:
                     snippet(messages_fts, 0, '', '', ' … ', 32) AS snippet,
                     length(m.content) AS content_length,
                     m.created_at,
-                    s.sha256 AS source_sha256,
-                    bm25(messages_fts) AS bm25_rank
+                    s.sha256 AS source_sha256
                 FROM messages_fts
                 JOIN messages m ON m.rowid = messages_fts.rowid
                 JOIN conversations c ON c.id = m.conversation_id
-                LEFT JOIN sources s ON s.id = m.source_id
+                LEFT JOIN sources s ON s.id = c.source_id
                 WHERE messages_fts MATCH ?
-                ORDER BY bm25_rank
+                ORDER BY bm25(messages_fts)
                 LIMIT ?
                 """,
                 (match_query, limit),
@@ -524,7 +524,8 @@ class ArchiveStore:
             conversation = conn.execute(
                 """
                 SELECT
-                    c.id, c.provider, c.source_conversation_id, c.title,
+                    c.id AS conversation_id,
+                    c.provider, c.source_conversation_id, c.title,
                     c.created_at, c.updated_at, s.sha256 AS source_sha256
                 FROM conversations c
                 LEFT JOIN sources s ON s.id = c.source_id
@@ -543,7 +544,8 @@ class ArchiveStore:
             messages = conn.execute(
                 """
                 SELECT
-                    id, source_message_id, provider_message_id, role,
+                    id AS message_id,
+                    source_message_id, provider_message_id, role,
                     substr(content, 1, ?) AS content,
                     length(content) AS content_length,
                     created_at, updated_at, parent_message_id, children_json
@@ -589,7 +591,8 @@ class ArchiveStore:
             row = conn.execute(
                 """
                 SELECT
-                    m.id, m.conversation_id, c.provider, c.title,
+                    m.id AS message_id,
+                    m.conversation_id, c.provider, c.title,
                     m.source_message_id, m.provider_message_id, m.role,
                     substr(m.content, ?, ?) AS content,
                     length(m.content) AS content_length,
@@ -598,7 +601,7 @@ class ArchiveStore:
                     s.sha256 AS source_sha256
                 FROM messages m
                 JOIN conversations c ON c.id = m.conversation_id
-                LEFT JOIN sources s ON s.id = m.source_id
+                LEFT JOIN sources s ON s.id = c.source_id
                 WHERE m.id = ?
                 """,
                 (start_char + 1, max_chars, message_id),

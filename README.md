@@ -34,7 +34,7 @@ SQLite + external-content FTS5
         ↓
 bounded MCP tools
         ↓
-authorized agent
+connected local agent
 ```
 
 The initial server exposes source-linked archive search and bounded source retrieval. Learned semantic compilation, embeddings, temporal assertions, context-pack construction, provider ACLs, and additional provider adapters come later without changing the source layer.
@@ -94,7 +94,7 @@ The intended higher-level surface includes `archive_recall`, `archive_context`, 
 
 Provider-specific formats stop at the adapter boundary. ChatGPT is only the first adapter. Claude, Codex, Grok, Hermes, and other archives should compile into the same canonical representation rather than leaking provider schemas into retrieval.
 
-For ChatGPT specifically, mapping node IDs are retained as canonical source identities because branch edges reference those IDs; nested provider message IDs are preserved separately. Provider-native identifier components are percent-escaped before composition so canonical IDs remain collision-safe even when a future provider uses colons or other delimiters.
+For ChatGPT specifically, message-bearing mapping node IDs are retained as canonical source identities because branch edges reference those IDs; nested provider message IDs are preserved separately. Structural mapping nodes that contain no message remain in the exact L0 source and are bridged when projecting canonical message-to-message links. Provider-native identifier components are percent-escaped before composition so canonical IDs remain collision-safe.
 
 ## Legacy projects
 
