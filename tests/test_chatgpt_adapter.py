@@ -40,11 +40,12 @@ def test_parser_preserves_branch_graph_and_content():
     assert len(conversation.messages) == 2
 
     first = conversation.messages[0]
-    assert first.message_id == "msg-user"
+    assert first.message_id == "node-user"
     assert first.content == "Pick a path"
     assert first.children_ids == ("node-a", "node-b")
 
     second = conversation.messages[1]
+    assert second.message_id == "node-a"
     assert second.parent_id == "node-user"
 
 
