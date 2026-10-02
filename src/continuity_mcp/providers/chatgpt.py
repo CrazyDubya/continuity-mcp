@@ -9,9 +9,7 @@ import ijson
 
 from continuity_mcp.models import CanonicalConversation, CanonicalMessage
 
-
 PROVIDER = "chatgpt"
-
 
 def _timestamp(value: Any) -> float | None:
     if value is None:
@@ -20,7 +18,6 @@ def _timestamp(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-
 
 def _content_to_text(content: Any) -> str:
     """Produce searchable text without discarding non-string content.
@@ -46,7 +43,6 @@ def _content_to_text(content: Any) -> str:
         return text
 
     return json.dumps(content, ensure_ascii=False, sort_keys=True)
-
 
 def _parse_conversation(raw_conversation: Any) -> CanonicalConversation | None:
     if not isinstance(raw_conversation, dict):
@@ -119,7 +115,6 @@ def _parse_conversation(raw_conversation: Any) -> CanonicalConversation | None:
         raw=raw_conversation,
     )
 
-
 def parse_chatgpt_export(data: Any) -> list[CanonicalConversation]:
     """Parse an in-memory ChatGPT conversations.json value.
 
@@ -136,7 +131,6 @@ def parse_chatgpt_export(data: Any) -> list[CanonicalConversation]:
         if conversation is not None:
             parsed.append(conversation)
     return parsed
-
 
 def iter_chatgpt_export(path: str | Path) -> Iterator[CanonicalConversation]:
     """Stream a ChatGPT conversations.json file one conversation at a time."""
