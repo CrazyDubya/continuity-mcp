@@ -24,9 +24,7 @@ _SCHEMA_VERSION = 1
 @dataclass(frozen=True, slots=True)
 class SourceRecord:
     id: int
-    provider: str
     sha256: str
-    original_name: str
     size_bytes: int
     path: Path
 
@@ -244,7 +242,7 @@ class ArchiveStore:
             )
             row = conn.execute(
                 """
-                SELECT id, provider, sha256, original_name, size_bytes, stored_relpath
+                SELECT id, sha256, size_bytes, stored_relpath
                 FROM sources
                 WHERE provider = ? AND sha256 = ?
                 """,
@@ -254,9 +252,7 @@ class ArchiveStore:
         assert row is not None
         return SourceRecord(
             id=row["id"],
-            provider=row["provider"],
             sha256=row["sha256"],
-            original_name=row["original_name"],
             size_bytes=row["size_bytes"],
             path=self.path.parent / row["stored_relpath"],
         )
