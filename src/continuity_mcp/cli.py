@@ -23,6 +23,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Import a ChatGPT conversations.json export",
     )
     import_chatgpt.add_argument("path", type=Path)
+    import_chatgpt.add_argument(
+        "--force",
+        action="store_true",
+        help="Rebuild canonical records even if this exact source was imported before",
+    )
 
     subcommands.add_parser("status", help="Show local archive status")
     return parser
@@ -37,6 +42,7 @@ def main() -> None:
         result = store.import_conversations(
             iter_chatgpt_export(source.path),
             source_id=source.id,
+            force_reimport=args.force,
         )
         print(
             json.dumps(
