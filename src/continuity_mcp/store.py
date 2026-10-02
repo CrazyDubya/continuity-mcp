@@ -107,146 +107,88 @@ class ArchiveStore:
 
     def _initialize(self) -> None:
         with self._connect() as conn:
-            version = int(conn.execute("PRAGMA user_version").fetchone()[0])
-
-            if version > _SCHEMA_VERSION:
-                raise RuntimeError(
-                    f"Database schema version {version} is newer than this build "
-                    f"(supports {_SCHEMA_VERSION})."
-                )
-
-            if version == 0:
-                existing = conn.execute(
-                    """
-                    SELECT name
-                    FROM sqlite_master
-                    WHERE type IN ('table', 'view')
-                      AND name NOT LIKE 'sqlite_%'
-                    LIMIT 1
-                    """
-                ).fetchone()
-                if existing is not None:
-                    raise RuntimeError(
-                        "Unversioned pre-release Continuity database detected. "
-                        "Create a fresh database and re-import the source archive."
-                    )
-                self._create_schema(conn)
-                conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
-            elif version < _SCHEMA_VERSION:
-                raise RuntimeError(
-                    f"Continuity schema version {version} is no longer supported "
-                    "by this pre-release build. Create a fresh database and "
-                    "re-import the source archive."
-                )
-
-            required_tables = {
-                "sources",
-                "imports",
-                "conversations",
-                "messages",
-                "messages_fts",
-            }
-            actual_tables = {
-                row["name"]
-                for row in conn.execute(
-                    """
-                    SELECT name
-                    FROM sqlite_master
-                    WHERE type IN ('table', 'view')
-                    """
-                )
-            }
-            missing = required_tables - actual_tables
-            if missing:
-                raise RuntimeError(
-                    "Continuity database is incomplete; missing: "
-                    + ", ".join(sorted(missing))
-                )
-
             conn.execute("PRAGMA journal_mode = WAL")
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS sources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    provider TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    original_name TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    stored_relpath TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(provider, sha256)
+                );
 
-    @staticmethod
-    def _create_schema(conn: sqlite3.Connection) -> None:
-        conn.executescript(
-            """
-            CREATE TABLE sources (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                provider TEXT NOT NULL,
-                sha256 TEXT NOT NULL,
-                original_name TEXT NOT NULL,
-                size_bytes INTEGER NOT NULL,
-                stored_relpath TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(provider, sha256)
-            );
+                CREATE TABLE IF NOT EXISTS imports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    provider TEXT NOT NULL,
+                    source_id INTEGER REFERENCES sources(id),
+                    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
 
-            CREATE TABLE imports (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                provider TEXT NOT NULL,
-                source_id INTEGER REFERENCES sources(id),
-                imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
+                CREATE TABLE IF NOT EXISTS conversations (
+                    id TEXT PRIMARY KEY,
+                    provider TEXT NOT NULL,
+                    source_conversation_id TEXT NOT NULL,
+                    source_id INTEGER REFERENCES sources(id),
+                    canonical_sha256 TEXT,
+                    title TEXT NOT NULL,
+                    created_at REAL,
+                    updated_at REAL,
+                    UNIQUE(provider, source_conversation_id)
+                );
 
-            CREATE TABLE conversations (
-                id TEXT PRIMARY KEY,
-                provider TEXT NOT NULL,
-                source_conversation_id TEXT NOT NULL,
-                source_id INTEGER REFERENCES sources(id),
-                canonical_sha256 TEXT,
-                title TEXT NOT NULL,
-                created_at REAL,
-                updated_at REAL,
-                UNIQUE(provider, source_conversation_id)
-            );
+                CREATE TABLE IF NOT EXISTS messages (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL
+                        REFERENCES conversations(id) ON DELETE CASCADE,
+                    provider TEXT NOT NULL,
+                    source_message_id TEXT NOT NULL,
+                    provider_message_id TEXT,
+                    source_id INTEGER REFERENCES sources(id),
+                    role TEXT,
+                    content TEXT NOT NULL,
+                    created_at REAL,
+                    updated_at REAL,
+                    parent_message_id TEXT,
+                    children_json TEXT NOT NULL
+                );
 
-            CREATE TABLE messages (
-                id TEXT PRIMARY KEY,
-                conversation_id TEXT NOT NULL
-                    REFERENCES conversations(id) ON DELETE CASCADE,
-                provider TEXT NOT NULL,
-                source_message_id TEXT NOT NULL,
-                provider_message_id TEXT,
-                source_id INTEGER REFERENCES sources(id),
-                role TEXT,
-                content TEXT NOT NULL,
-                created_at REAL,
-                updated_at REAL,
-                parent_message_id TEXT,
-                children_json TEXT NOT NULL
-            );
+                CREATE INDEX IF NOT EXISTS idx_messages_conversation
+                    ON messages(conversation_id);
+                CREATE INDEX IF NOT EXISTS idx_messages_created
+                    ON messages(created_at);
+                CREATE INDEX IF NOT EXISTS idx_messages_provider_message
+                    ON messages(provider, provider_message_id);
 
-            CREATE INDEX idx_messages_conversation
-                ON messages(conversation_id);
-            CREATE INDEX idx_messages_created
-                ON messages(created_at);
-            CREATE INDEX idx_messages_provider_message
-                ON messages(provider, provider_message_id);
+                CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+                    content,
+                    content='messages',
+                    content_rowid='rowid',
+                    tokenize='unicode61'
+                );
 
-            CREATE VIRTUAL TABLE messages_fts USING fts5(
-                content,
-                content='messages',
-                content_rowid='rowid',
-                tokenize='unicode61'
-            );
+                CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+                    INSERT INTO messages_fts(rowid, content)
+                    VALUES (new.rowid, new.content);
+                END;
 
-            CREATE TRIGGER messages_ai AFTER INSERT ON messages BEGIN
-                INSERT INTO messages_fts(rowid, content)
-                VALUES (new.rowid, new.content);
-            END;
+                CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+                    INSERT INTO messages_fts(messages_fts, rowid, content)
+                    VALUES ('delete', old.rowid, old.content);
+                END;
 
-            CREATE TRIGGER messages_ad AFTER DELETE ON messages BEGIN
-                INSERT INTO messages_fts(messages_fts, rowid, content)
-                VALUES ('delete', old.rowid, old.content);
-            END;
-
-            CREATE TRIGGER messages_au AFTER UPDATE ON messages BEGIN
-                INSERT INTO messages_fts(messages_fts, rowid, content)
-                VALUES ('delete', old.rowid, old.content);
-                INSERT INTO messages_fts(rowid, content)
-                VALUES (new.rowid, new.content);
-            END;
-            """
-        )
+                CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+                    INSERT INTO messages_fts(messages_fts, rowid, content)
+                    VALUES ('delete', old.rowid, old.content);
+                    INSERT INTO messages_fts(rowid, content)
+                    VALUES (new.rowid, new.content);
+                END;
+                """
+            )
+            conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
 
     def ingest_source(self, source_path: str | Path, provider: str) -> SourceRecord:
         """Copy exact source bytes into content-addressed local storage."""
