@@ -82,8 +82,11 @@ A ChatGPT import follows this path:
       -> external-content FTS5 index
 
 The parser processes one conversation at a time rather than materializing the
-entire export in memory. Re-importing a conversation replaces its canonical
-messages and deterministically rebuilds the corresponding FTS entries.
+entire export in memory. Exact duplicate sources are skipped by default.
+Changed cumulative exports compute a deterministic fingerprint of each
+canonical conversation; unchanged conversations avoid message and FTS writes,
+while changed conversations replace their canonical messages and rebuild their
+FTS entries. A forced re-import path exists for deliberate adapter rebuilds.
 
 ## MCP baseline
 
@@ -99,7 +102,7 @@ primitives or query the same store rather than bypassing provenance.
 
 ## Near-term evolution
 
-1. Add explicit schema migrations before the first durable release.
+1. Extend the schema-version baseline with explicit migration steps before the first durable release.
 2. Make canonical message content multimodal rather than a text projection.
 3. Add provider adapter conformance fixtures.
 4. Add embeddings as an optional L2 index.
