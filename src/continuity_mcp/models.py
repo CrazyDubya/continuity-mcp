@@ -11,6 +11,7 @@ class CanonicalMessage:
     message_id: str
     role: str | None
     content: str
+    provider_message_id: str | None = None
     created_at: float | None = None
     updated_at: float | None = None
     parent_id: str | None = None
