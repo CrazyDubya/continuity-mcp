@@ -326,7 +326,6 @@ class ArchiveStore:
                     and existing["canonical_sha256"] == canonical_sha256
                     and not force_reimport
                 ):
-                    imported_conversations += 1
                     unchanged_conversations += 1
                     continue
 
