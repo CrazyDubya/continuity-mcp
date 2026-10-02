@@ -107,10 +107,12 @@ def test_import_search_pagination_and_reimport_are_idempotent(tmp_path):
         max_chars_per_message=256,
     )
     assert conversation is not None
+    assert conversation["conversation_id"] == "chatgpt:c1"
     assert conversation["message_count"] == 2
     assert conversation["has_more"] is True
     assert len(conversation["messages"]) == 1
     first_message = conversation["messages"][0]
+    assert first_message["message_id"] == "chatgpt:c1:m1"
     assert first_message["children_ids"] == ["chatgpt:c1:m2"]
     assert first_message["content_truncated"] is False
 
@@ -141,6 +143,7 @@ def test_message_slices_large_content_without_losing_exact_text(tmp_path):
 
     first = store.message("chatgpt:large:m1", max_chars=256)
     assert first is not None
+    assert first["message_id"] == "chatgpt:large:m1"
     assert first["content"] == content[:256]
     assert first["next_start_char"] == 256
 
