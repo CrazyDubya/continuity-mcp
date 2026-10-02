@@ -126,6 +126,9 @@ class ArchiveStore:
                     imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE INDEX IF NOT EXISTS idx_imports_source
+                    ON imports(source_id);
+
                 CREATE TABLE IF NOT EXISTS conversations (
                     id TEXT PRIMARY KEY,
                     provider TEXT NOT NULL,
@@ -154,8 +157,6 @@ class ArchiveStore:
 
                 CREATE INDEX IF NOT EXISTS idx_messages_conversation
                     ON messages(conversation_id);
-                CREATE INDEX IF NOT EXISTS idx_messages_created
-                    ON messages(created_at);
                 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
                     content,
                     content='messages',
