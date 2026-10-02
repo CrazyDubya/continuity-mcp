@@ -5,9 +5,9 @@
 Continuity is a user-hosted memory boundary between private AI interaction
 archives and agents. It is deliberately not an agent itself.
 
-The system owns ingestion, provenance, indexing, retrieval, and authorization.
-Models may later classify or synthesize derived memory, but they do not become
-the source of truth and do not grant themselves access.
+The current foundation owns ingestion, provenance, indexing, and retrieval.
+Local stdio access inherits the permissions of the process that launches the
+server; remote authentication and scoped authorization are not implemented.
 
 ## Layers
 
