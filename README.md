@@ -34,7 +34,7 @@ SQLite + external-content FTS5
         ↓
 bounded MCP tools
         ↓
-authorized agent
+connected local agent
 ```
 
 The initial server exposes source-linked archive search and bounded source retrieval. Learned semantic compilation, embeddings, temporal assertions, context-pack construction, provider ACLs, and additional provider adapters come later without changing the source layer.
