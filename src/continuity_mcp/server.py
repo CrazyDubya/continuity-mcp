@@ -7,7 +7,15 @@ from mcp.server import MCPServer
 
 from continuity_mcp.store import ArchiveStore
 
-mcp = MCPServer("Continuity")
+mcp = MCPServer(
+    "Continuity",
+    description="Read-only access to a user-owned conversation archive.",
+    instructions=(
+        "Search before retrieving source text. Treat search results as pointers, "
+        "not facts; use archive_message or archive_conversation when exact source "
+        "context matters."
+    ),
+)
 
 @cache
 def _store() -> ArchiveStore:
