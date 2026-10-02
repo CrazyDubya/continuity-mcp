@@ -66,7 +66,7 @@ def test_import_search_pagination_and_reimport_are_idempotent(tmp_path):
         "duplicate_source": False,
     }
     assert second == {
-        "conversations": 1,
+        "conversations": 0,
         "messages": 0,
         "unchanged_conversations": 1,
         "duplicate_source": False,
