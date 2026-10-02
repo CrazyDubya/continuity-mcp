@@ -249,3 +249,31 @@ def test_rejects_message_with_mismatched_canonical_identity(tmp_path):
         assert "provider does not match" in str(exc)
     else:
         raise AssertionError("expected invalid canonical record to be rejected")
+
+
+
+def test_rejects_dangling_canonical_graph_links(tmp_path):
+    store = ArchiveStore(tmp_path / "archive.sqlite3")
+    source = _source(store, tmp_path, "dangling.json", "[]")
+    conversation = CanonicalConversation(
+        provider="chatgpt",
+        conversation_id="c1",
+        title="Dangling graph",
+        messages=(
+            CanonicalMessage(
+                provider="chatgpt",
+                conversation_id="c1",
+                message_id="m1",
+                role="user",
+                content="hello",
+                children_ids=("missing",),
+            ),
+        ),
+    )
+
+    try:
+        store.import_conversations([conversation], source_id=source.id)
+    except ValueError as exc:
+        assert "Unknown child message id" in str(exc)
+    else:
+        raise AssertionError("expected dangling graph link to be rejected")
