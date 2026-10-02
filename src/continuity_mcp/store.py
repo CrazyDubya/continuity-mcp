@@ -423,13 +423,14 @@ class ArchiveStore:
 
                 imported_conversations += 1
 
-            if provider_seen:
+            import_provider = provider_seen or source_provider
+            if import_provider:
                 conn.execute(
                     """
                     INSERT INTO imports(provider, source_id)
                     VALUES (?, ?)
                     """,
-                    (provider_seen, source_id),
+                    (import_provider, source_id),
                 )
 
         return {
@@ -463,11 +464,10 @@ class ArchiveStore:
             import_count = conn.execute(
                 "SELECT COUNT(*) FROM imports"
             ).fetchone()[0]
+            schema_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
 
         return {
-            "schema_version": int(
-                conn.execute("PRAGMA user_version").fetchone()[0]
-            ),
+            "schema_version": schema_version,
             "providers": providers,
             "conversations": conversation_count,
             "messages": message_count,
