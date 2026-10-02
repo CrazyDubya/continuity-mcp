@@ -14,11 +14,9 @@ from platformdirs import user_data_path
 
 from continuity_mcp.models import CanonicalConversation
 
-
 _SEARCH_LIMIT_MAX = 50
 _CONVERSATION_LIMIT_MAX = 200
 _MESSAGE_CHARS_MAX = 20_000
-
 
 @dataclass(frozen=True, slots=True)
 class SourceRecord:
@@ -29,21 +27,17 @@ class SourceRecord:
     size_bytes: int
     path: Path
 
-
 def default_db_path() -> Path:
     configured = os.environ.get("CONTINUITY_DB")
     if configured:
         return Path(configured).expanduser()
     return user_data_path("continuity-mcp", appauthor=False) / "continuity.sqlite3"
 
-
 def _canonical_conversation_id(provider: str, source_id: str) -> str:
     return f"{provider}:{source_id}"
 
-
 def _canonical_message_id(provider: str, conversation_id: str, source_id: str) -> str:
     return f"{provider}:{conversation_id}:{source_id}"
-
 
 def _fts_query(query: str) -> str:
     # Quoting the whitespace-delimited terms keeps user input out of FTS query
@@ -52,7 +46,6 @@ def _fts_query(query: str) -> str:
     if not terms:
         raise ValueError("Search query must contain at least one searchable term")
     return " ".join(f'"{term.replace(chr(34), chr(34) * 2)}"' for term in terms)
-
 
 class ArchiveStore:
     def __init__(self, path: str | Path | None = None):
