@@ -99,7 +99,7 @@ def test_parser_retains_non_string_parts_as_searchable_json():
             "mapping": {
                 "n": {
                     "message": {
-                        "id": "m",
+                        "id": 0,
                         "author": {"role": "assistant"},
                         "content": {"parts": [{"kind": "tool", "value": 42}]},
                     }
@@ -108,4 +108,5 @@ def test_parser_retains_non_string_parts_as_searchable_json():
         }
     ]
     message = parse_chatgpt_export(data)[0].messages[0]
+    assert message.provider_message_id == "0"
     assert '"kind": "tool"' in message.content
