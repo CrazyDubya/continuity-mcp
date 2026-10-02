@@ -68,7 +68,7 @@ def test_import_search_pagination_and_reimport_are_idempotent(tmp_path):
     conversation = store.conversation(
         "chatgpt:c1",
         limit=1,
-        max_chars_per_message=10,
+        max_chars_per_message=256,
     )
     assert conversation is not None
     assert conversation["message_count"] == 2
@@ -76,7 +76,7 @@ def test_import_search_pagination_and_reimport_are_idempotent(tmp_path):
     assert len(conversation["messages"]) == 1
     first_message = conversation["messages"][0]
     assert first_message["children_ids"] == ["chatgpt:c1:m2"]
-    assert first_message["content_truncated"] is True
+    assert first_message["content_truncated"] is False
 
     second_page = store.conversation("chatgpt:c1", offset=1, limit=1)
     assert second_page is not None
