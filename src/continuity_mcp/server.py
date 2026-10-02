@@ -8,14 +8,11 @@ from continuity_mcp.store import ArchiveStore
 
 
 mcp = MCPServer("Continuity")
-_store_instance: ArchiveStore | None = None
 
 
+@cache
 def _store() -> ArchiveStore:
-    global _store_instance
-    if _store_instance is None:
-        _store_instance = ArchiveStore()
-    return _store_instance
+    return ArchiveStore()
 
 
 @mcp.tool()
