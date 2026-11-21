@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from itertools import chain
 from pathlib import Path
 from typing import Any
 
@@ -182,7 +183,11 @@ def iter_chatgpt_export(path: str | Path) -> Iterator[CanonicalConversation]:
     """Stream a ChatGPT conversations.json file one conversation at a time."""
     source = Path(path)
     with source.open("rb") as handle:
-        for raw_conversation in ijson.items(handle, "item", use_float=True):
+        events = ijson.parse(handle, use_float=True)
+        first = next(events, None)
+        if first is None or first[:2] != ("", "start_array"):
+            raise TypeError("ChatGPT export must be a JSON array of conversations")
+        for raw_conversation in ijson.items(chain((first,), events), "item"):
             conversation = _parse_conversation(raw_conversation)
             if conversation is not None:
                 yield conversation
