@@ -84,7 +84,7 @@ The project targets the current stable v2 line of the official Python MCP SDK.
 The bootstrap server exposes four read-only, bounded primitives:
 
 - `archive_status()` — report provider/archive counts without exposing host paths.
-- `archive_search(query, limit)` — FTS search returning source-linked snippets, never whole messages.
+- `archive_search(query, limit)` — FTS search returning at most 50 source-linked snippets of at most 1,024 characters each. `snippet_truncated` reports only extra character clipping of the token-based SQLite snippet, not whether the full message was returned. Long snippets use a window around the first match selected by SQLite, so other distant terms in a multi-term query may be absent. A single matched token longer than the cap is itself clipped. Compare with `content_length` to distinguish a snippet from the full message. Short messages can fit in full. Exact text remains available through bounded retrieval.
 - `archive_conversation(conversation_id, offset, limit, max_chars_per_message)` — page through a conversation with bounded message content.
 - `archive_message(message_id, start_char, max_chars)` — retrieve exact message text in bounded character slices.
 

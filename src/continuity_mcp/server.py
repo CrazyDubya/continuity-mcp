@@ -30,8 +30,11 @@ def archive_status() -> dict[str, Any]:
 def archive_search(query: str, limit: int = 10) -> list[dict[str, Any]]:
     """Search archived messages and return bounded snippets with source IDs.
 
-    Search never returns whole messages. Use archive_message or
-    archive_conversation to retrieve bounded source text.
+    Each snippet is at most 1,024 characters; short messages may fit in full.
+    snippet_truncated reports character clipping of SQLite's token snippet,
+    not whole-message completeness; compare with content_length. The character
+    window keeps the first match selected by SQLite, not every distant query
+    term. Use archive_message or archive_conversation for bounded exact text.
     """
     return _store().search(query, limit)
 
