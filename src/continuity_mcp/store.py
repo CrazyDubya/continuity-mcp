@@ -17,6 +17,7 @@ from platformdirs import user_data_path
 from continuity_mcp.models import CanonicalConversation
 
 _SEARCH_LIMIT_MAX = 50
+_SEARCH_SNIPPET_CHARS_MAX = 1_024
 _CONVERSATION_LIMIT_MAX = 200
 _MESSAGE_CHARS_MAX = 20_000
 
@@ -481,31 +482,58 @@ class ArchiveStore:
         limit = max(1, min(int(limit), _SEARCH_LIMIT_MAX))
         match_query = _fts_query(query)
 
+        # Mark matches only with delimiters absent from every returned message.
+        # On collision, grow both delimiters exponentially and retry. This avoids
+        # interpreting source control characters as match markup.
+        before, after = "\x01", "\x02"
         with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT
-                    m.id AS message_id,
-                    m.conversation_id,
-                    c.provider,
-                    c.title,
-                    m.role,
-                    snippet(messages_fts, 0, '', '', ' … ', 32) AS snippet,
-                    length(m.content) AS content_length,
-                    m.created_at,
-                    s.sha256 AS source_sha256
-                FROM messages_fts
-                JOIN messages m ON m.rowid = messages_fts.rowid
-                JOIN conversations c ON c.id = m.conversation_id
-                JOIN sources s ON s.id = c.source_id
-                WHERE messages_fts MATCH ?
-                ORDER BY bm25(messages_fts)
-                LIMIT ?
-                """,
-                (match_query, limit),
-            ).fetchall()
+            while True:
+                rows = conn.execute(
+                    """
+                    SELECT
+                        m.id AS message_id,
+                        m.conversation_id,
+                        c.provider,
+                        c.title,
+                        m.role,
+                        snippet(messages_fts, 0, ?, ?, ' … ', 32) AS snippet,
+                        instr(m.content, ?) > 0 OR instr(m.content, ?) > 0
+                            AS marker_collision,
+                        length(m.content) AS content_length,
+                        m.created_at,
+                        s.sha256 AS source_sha256
+                    FROM messages_fts
+                    JOIN messages m ON m.rowid = messages_fts.rowid
+                    JOIN conversations c ON c.id = m.conversation_id
+                    JOIN sources s ON s.id = c.source_id
+                    WHERE messages_fts MATCH ?
+                    ORDER BY bm25(messages_fts)
+                    LIMIT ?
+                    """,
+                    (before, after, before, after, match_query, limit),
+                ).fetchall()
+                if not any(row["marker_collision"] for row in rows):
+                    break
+                before *= 2
+                after *= 2
 
-        return [dict(row) for row in rows]
+        results = []
+        for row in rows:
+            item = dict(row)
+            item.pop("marker_collision")
+            marked = item["snippet"]
+            first_match = marked.find(before)
+            prefix = marked[:first_match] if first_match >= 0 else ""
+            match_position = len(prefix.replace(before, "").replace(after, ""))
+            plain = marked.replace(before, "").replace(after, "")
+            start = min(
+                max(0, match_position - _SEARCH_SNIPPET_CHARS_MAX // 3),
+                max(0, len(plain) - _SEARCH_SNIPPET_CHARS_MAX),
+            )
+            item["snippet"] = plain[start:start + _SEARCH_SNIPPET_CHARS_MAX]
+            item["snippet_truncated"] = len(plain) > _SEARCH_SNIPPET_CHARS_MAX
+            results.append(item)
+        return results
 
     def conversation(
         self,
